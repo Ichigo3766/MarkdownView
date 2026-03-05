@@ -8,12 +8,6 @@
 import MarkdownParser
 import SwiftUI
 
-/// Background queue for markdown parsing — pure computation, thread-safe.
-private let markdownParseQueue = DispatchQueue(
-    label: "MarkdownView.ParseQueue",
-    qos: .userInteractive
-)
-
 protocol MarkdownViewRepresentableBase {
     var contentSource: MarkdownView.ContentSource { get }
     var theme: MarkdownTheme { get }
@@ -33,65 +27,44 @@ extension MarkdownViewRepresentableBase {
     }
 
     func updateMarkdownTextView(_ view: MarkdownTextView, coordinator: MarkdownViewCoordinator) {
+        let needsUpdate: Bool
+        let content: MarkdownTextView.PreprocessedContent
+
         switch contentSource {
         case let .text(text):
-            let needsUpdate = coordinator.lastText != text
+            needsUpdate = coordinator.lastText != text
                 || coordinator.lastTheme != theme
-            guard needsUpdate else {
-                updateMeasuredHeight(for: view)
-                return
-            }
-
-            coordinator.lastText = text
-            coordinator.lastPreprocessedContent = nil
-
-            if coordinator.lastTheme != theme {
-                view.theme = theme
-                coordinator.lastTheme = theme
-            }
-
-            // Cancel any previous in-flight parse work item to prevent
-            // queue pile-up during streaming (memory leak fix).
-            coordinator.pendingParseWork?.cancel()
-
-            let currentTheme = theme
-            let capturedText = text
-            let workItem = DispatchWorkItem { [weak coordinator] in
-                guard let coordinator, !coordinator.isCancelled else { return }
-
+            if needsUpdate {
                 let parser = MarkdownParser()
-                let result = parser.parse(capturedText)
-
-                guard !coordinator.isCancelled else { return }
-
-                let content = MarkdownTextView.PreprocessedContent(
-                    parserResult: result, theme: currentTheme)
-
-                DispatchQueue.main.async {
-                    // Only deliver if content hasn't changed since we started parsing
-                    guard coordinator.lastText == capturedText else { return }
-                    view.setMarkdown(content)
-                    view.invalidateIntrinsicContentSize()
-                    self.updateMeasuredHeight(for: view)
-                }
+                let result = parser.parse(text)
+                content = MarkdownTextView.PreprocessedContent(parserResult: result, theme: theme)
+                coordinator.lastText = text
+                coordinator.lastPreprocessedContent = nil
+            } else {
+                content = view.document
             }
-
-            coordinator.pendingParseWork = workItem
-            markdownParseQueue.async(execute: workItem)
 
         case let .preprocessed(preprocessedContent):
-            let needsUpdate = coordinator.lastPreprocessedContent !== preprocessedContent
+            needsUpdate = coordinator.lastPreprocessedContent !== preprocessedContent
                 || coordinator.lastTheme != theme
+            content = preprocessedContent
             if needsUpdate {
                 coordinator.lastText = ""
                 coordinator.lastPreprocessedContent = preprocessedContent
-                view.theme = theme
-                view.setMarkdown(preprocessedContent)
-                view.invalidateIntrinsicContentSize()
-                coordinator.lastTheme = theme
             }
-            updateMeasuredHeight(for: view)
         }
+
+        if needsUpdate {
+            view.theme = theme
+            // Use setMarkdown() (throttled Combine pipeline) instead of
+            // setMarkdownManually() to engage the built-in 20fps throttle
+            // during streaming. For cold loads this still works because the
+            // Combine subject fires immediately on first content.
+            view.setMarkdown(content)
+            view.invalidateIntrinsicContentSize()
+            coordinator.lastTheme = theme
+        }
+        updateMeasuredHeight(for: view)
     }
 
     func updateMeasuredHeight(for view: MarkdownTextView) {
