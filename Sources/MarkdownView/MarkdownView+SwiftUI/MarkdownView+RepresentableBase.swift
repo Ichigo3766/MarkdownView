@@ -56,11 +56,7 @@ extension MarkdownViewRepresentableBase {
 
         if needsUpdate {
             view.theme = theme
-            // Use setMarkdown() (throttled Combine pipeline) instead of
-            // setMarkdownManually() to engage the built-in 20fps throttle
-            // during streaming. For cold loads this still works because the
-            // Combine subject fires immediately on first content.
-            view.setMarkdown(content)
+            view.setMarkdownManually(content)
             view.invalidateIntrinsicContentSize()
             coordinator.lastTheme = theme
         }
