@@ -35,48 +35,41 @@ extension MarkdownViewRepresentableBase {
     func updateMarkdownTextView(_ view: MarkdownTextView, coordinator: MarkdownViewCoordinator) {
         switch contentSource {
         case let .text(text):
-            // Fast content hash guard — skip entirely if unchanged
-            let textHash = text.hashValue
-            let themeChanged = coordinator.lastTheme != theme
-            guard textHash != coordinator.lastTextHash || themeChanged else {
+            let needsUpdate = coordinator.lastText != text
+                || coordinator.lastTheme != theme
+            guard needsUpdate else {
                 updateMeasuredHeight(for: view)
                 return
             }
 
             coordinator.lastText = text
-            coordinator.lastTextHash = textHash
             coordinator.lastPreprocessedContent = nil
 
-            if themeChanged {
+            if coordinator.lastTheme != theme {
                 view.theme = theme
                 coordinator.lastTheme = theme
             }
 
-            // CRITICAL FIX: Cancel any previous in-flight parse work item.
-            // Without this, every streaming token queues a new full parse
-            // on the serial background queue. With 1000-line code blocks,
-            // each parse creates ~10MB of PreprocessedContent (AST + 
-            // NSAttributedStrings + highlight maps). At 20 tokens/sec with
-            // 200ms parse time, the queue grows unboundedly → 3GB+ memory.
+            // Cancel any previous in-flight parse work item to prevent
+            // queue pile-up during streaming (memory leak fix).
             coordinator.pendingParseWork?.cancel()
 
             let currentTheme = theme
+            let capturedText = text
             let workItem = DispatchWorkItem { [weak coordinator] in
-                // Check if this work was cancelled before doing expensive work
                 guard let coordinator, !coordinator.isCancelled else { return }
 
                 let parser = MarkdownParser()
-                let result = parser.parse(text)
+                let result = parser.parse(capturedText)
 
-                // Check again after parse (may have been cancelled during parse)
                 guard !coordinator.isCancelled else { return }
 
                 let content = MarkdownTextView.PreprocessedContent(
                     parserResult: result, theme: currentTheme)
 
                 DispatchQueue.main.async {
-                    // Final check — content may have changed while we were parsing
-                    guard coordinator.lastTextHash == textHash else { return }
+                    // Only deliver if content hasn't changed since we started parsing
+                    guard coordinator.lastText == capturedText else { return }
                     view.setMarkdown(content)
                     view.invalidateIntrinsicContentSize()
                     self.updateMeasuredHeight(for: view)
@@ -91,7 +84,6 @@ extension MarkdownViewRepresentableBase {
                 || coordinator.lastTheme != theme
             if needsUpdate {
                 coordinator.lastText = ""
-                coordinator.lastTextHash = 0
                 coordinator.lastPreprocessedContent = preprocessedContent
                 view.theme = theme
                 view.setMarkdown(preprocessedContent)
