@@ -64,11 +64,22 @@ final class ListProcessor {
         return 1
     }
 
-    private func renderListItem(_ item: ListItem, reduceLineSpacing: Bool = false, total _: Int) -> NSAttributedString {
+    /// Measures the width of the widest number label (e.g. "99." for a 99-item list)
+    /// so all items share the same indent regardless of digit count.
+    private func measureMaxNumberWidth(_ maxNum: Int) -> CGFloat {
+        let text = "\(maxNum)." as CFString
+        let attrs: [CFString: Any] = [kCTFontAttributeName: theme.fonts.body]
+        let attrStr = CFAttributedStringCreate(nil, text, attrs as CFDictionary)!
+        let line = CTLineCreateWithAttributedString(attrStr)
+        return ceil(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
+
+    private func renderListItem(_ item: ListItem, reduceLineSpacing: Bool = false, total _: Int, baseIndent: CGFloat) -> NSAttributedString {
         let paragraphStyle: NSMutableParagraphStyle = .init()
-        paragraphStyle.paragraphSpacing = reduceLineSpacing ? 8 : 16
-        paragraphStyle.lineSpacing = 4
-        let indent = CGFloat(item.depth + 1) * 24
+        paragraphStyle.paragraphSpacing = reduceLineSpacing ? theme.spacings.lineSpacing : theme.spacings.paragraphSpacing
+        paragraphStyle.lineSpacing = theme.spacings.lineSpacing
+        // Dynamic indent: baseIndent (computed from max number width) + nesting
+        let indent = baseIndent + CGFloat(item.depth) * 20
         paragraphStyle.firstLineHeadIndent = indent
         paragraphStyle.headIndent = indent
 
@@ -100,9 +111,15 @@ final class ListProcessor {
     }
 
     private func renderListItems(_ items: [ListItem]) -> NSAttributedString {
+        // Find max number to calculate dynamic indent width
+        let maxNum = items.filter(\.ordered).map(\.index).max() ?? 1
+        let numWidth = measureMaxNumberWidth(maxNum)
+        // Base indent = number width + 12pt padding (6pt before + 6pt after number)
+        let baseIndent = numWidth + 12
+
         let result = NSMutableAttributedString()
         for (index, item) in items.enumerated() {
-            let rendered = renderListItem(item, reduceLineSpacing: index != items.count - 1, total: items.count)
+            let rendered = renderListItem(item, reduceLineSpacing: index != items.count - 1, total: items.count, baseIndent: baseIndent)
             result.append(rendered)
         }
         return result

@@ -97,26 +97,24 @@ extension TextBuilder {
                 }
             }
             .withNumberedDrawing { context, line, lineOrigin, num in
-                let rect = lineBoundingBox(line, lineOrigin: lineOrigin)
-                    .offsetBy(dx: -16, dy: 0)
-                    .offsetBy(dx: -8, dy: 0)
-                let image = kNumberCircleImage(num)
-                #if canImport(UIKit)
-                    guard let cgImage = image.cgImage else { return }
-                #elseif canImport(AppKit)
-                    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-                #endif
-                let imageSize = image.size
-                let targetRect: CGRect = .init(
-                    x: rect.minX,
-                    y: rect.midY - imageSize.height / 2,
-                    width: imageSize.width,
-                    height: imageSize.height
-                )
+                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
                 let textColor = populateContextColorFromFirstRun(context: context, line: line)
-                context.clip(to: targetRect, mask: cgImage)
-                context.setFillColor(textColor.cgColor)
-                context.fill(targetRect)
+                // Draw "1." LEFT-aligned at a FIXED x, exactly like bullets.
+                // Bullets: fixed x = boundingBox.minX - 16
+                // Numbers: fixed x = 4pt from the left margin (start of indent zone)
+                let numText = "\(num)."
+                let font = theme.fonts.body
+                let attrs: [CFString: Any] = [
+                    kCTFontAttributeName: font,
+                    kCTForegroundColorAttributeName: textColor.cgColor,
+                ]
+                let attrStr = CFAttributedStringCreate(nil, numText as CFString, attrs as CFDictionary)!
+                let ctLine = CTLineCreateWithAttributedString(attrStr)
+                // LEFT-aligned: all numbers start at the same fixed x
+                // This is 4pt from the page left edge (consistent for all items)
+                let x: CGFloat = 4
+                context.textPosition = CGPoint(x: x, y: lineOrigin.y)
+                CTLineDraw(ctLine, context)
             }
             .withCheckboxDrawing { context, line, lineOrigin, isChecked in
                 let rect = lineBoundingBox(line, lineOrigin: lineOrigin)
