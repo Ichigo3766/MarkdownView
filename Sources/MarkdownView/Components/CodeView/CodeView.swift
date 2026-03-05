@@ -30,13 +30,52 @@ import Litext
         var content: String = "" {
             didSet {
                 guard oldValue != content else { return }
+                // Render immediately with whatever highlight map we have (may be empty)
                 textView.attributedText = highlightMap.apply(to: content, with: theme)
                 lineNumberView.updateForContent(content)
                 updateLineNumberView()
+                // Trigger lazy async highlighting — colors appear after ~50ms
+                triggerAsyncHighlight()
             }
         }
 
         // MARK: CONTENT -
+
+        /// Tracks the current async highlight task so we can cancel stale ones
+        private var highlightTask: Task<Void, Never>?
+
+        /// Triggers async syntax highlighting via HighlightSwift.
+        /// Code renders immediately as plain monospaced text, then colors
+        /// fade in when highlighting completes.
+        ///
+        /// **Debounced**: Waits 300ms after the last content change before
+        /// triggering. During streaming, content changes every ~50ms — without
+        /// debouncing, each token would cancel+restart the highlight, causing
+        /// visible color flickering. The 300ms delay ensures highlighting only
+        /// runs once content has stabilized.
+        private func triggerAsyncHighlight() {
+            highlightTask?.cancel()
+            let capturedContent = content
+            let capturedLanguage = language
+            let capturedTheme = theme
+            highlightTask = Task { [weak self] in
+                // Debounce: wait 300ms for content to stabilize
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+
+                let map = await CodeHighlighter.current.highlightAsync(
+                    content: capturedContent,
+                    language: capturedLanguage,
+                    theme: capturedTheme
+                )
+                guard !Task.isCancelled, let self,
+                      self.content == capturedContent else { return }
+                await MainActor.run {
+                    self.highlightMap = map
+                    self.textView.attributedText = map.apply(to: capturedContent, with: capturedTheme)
+                }
+            }
+        }
 
         var previewAction: ((String?, NSAttributedString) -> Void)? {
             didSet {
@@ -80,19 +119,17 @@ import Litext
             let labelSize = languageLabel.intrinsicContentSize
             let barHeight = labelSize.height + CodeViewConfiguration.barPadding * 2
             let textSize = textView.intrinsicContentSize
-            let supposedHeight = Self.intrinsicHeight(for: content, theme: theme)
-
             let lineNumberWidth = lineNumberView.intrinsicContentSize.width
 
+            // Use actual rendered text height — not the formula-based estimate.
+            // The formula (lineHeight × rows) overestimates, leaving dead space
+            // at the bottom of code blocks.
             return CGSize(
                 width: max(
                     labelSize.width + CodeViewConfiguration.barPadding * 2,
                     lineNumberWidth + textSize.width + CodeViewConfiguration.codePadding * 2
                 ),
-                height: max(
-                    barHeight + textSize.height + CodeViewConfiguration.codePadding * 2,
-                    supposedHeight
-                )
+                height: barHeight + textSize.height + CodeViewConfiguration.codePadding * 2
             )
         }
 

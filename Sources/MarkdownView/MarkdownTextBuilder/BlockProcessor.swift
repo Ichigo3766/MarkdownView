@@ -99,7 +99,9 @@ final class BlockProcessor {
         codeView.content = content
         let drawer = codeDrawing!
         let text = buildWithParagraphSync { paragraph in
-            let height = CodeView.intrinsicHeight(for: content, theme: theme)
+            // Use the actual rendered CodeView height — not the formula estimate.
+            // The formula (lineHeight × rows) overestimates, leaving dead space.
+            let height = codeView.intrinsicContentSize.height
             paragraph.minimumLineHeight = height
         } content: {
             .init(string: LTXReplacementText, attributes: [

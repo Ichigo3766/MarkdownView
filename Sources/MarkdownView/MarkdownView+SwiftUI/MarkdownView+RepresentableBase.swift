@@ -68,9 +68,8 @@ extension MarkdownViewRepresentableBase {
         let size = view.boundingSize(for: width)
         let height = ceil(size.height)
         guard abs(height - heightBinding.wrappedValue) > 0.5 else { return }
-        // Synchronous height update — required for VStack which measures all
-        // children in one pass. The previous DispatchQueue.main.async caused
-        // all MarkdownViews to report 0 height on first render with VStack.
-        heightBinding.wrappedValue = height
+        DispatchQueue.main.async {
+            self.heightBinding.wrappedValue = height
+        }
     }
 }

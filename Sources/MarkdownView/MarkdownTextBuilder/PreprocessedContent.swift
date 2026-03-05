@@ -27,10 +27,10 @@ public extension MarkdownTextView {
         public init(parserResult: MarkdownParser.ParseResult, theme: MarkdownTheme) {
             blocks = parserResult.document
             rendered = parserResult.render(theme: theme)
-            // Skip Highlightr syntax highlighting entirely — the regex engine
-            // causes O(n²) CPU + memory on large code blocks (1000+ lines),
-            // leading to 3GB+ memory and text disappearing. Code blocks still
-            // render with monospaced font in their card UI, just no color tokens.
+            // Always empty — highlighting is now lazy and async.
+            // Each CodeView triggers its own async highlight via HighlightSwift
+            // when it becomes visible. This eliminates the O(n²) sync blocking
+            // that caused 3GB+ memory and lag during streaming.
             highlightMaps = [:]
         }
 
