@@ -13,4 +13,18 @@ final class MarkdownViewCoordinator {
     var lastTextHash: Int = 0
     var lastPreprocessedContent: MarkdownTextView.PreprocessedContent?
     var lastTheme: MarkdownTheme = .default
+
+    /// The currently in-flight background parse work item.
+    /// Cancelled when new content arrives to prevent queue pile-up
+    /// that causes unbounded memory growth during streaming.
+    var pendingParseWork: DispatchWorkItem?
+
+    /// Set to true when the coordinator is being torn down.
+    var isCancelled: Bool = false
+
+    deinit {
+        isCancelled = true
+        pendingParseWork?.cancel()
+        pendingParseWork = nil
+    }
 }

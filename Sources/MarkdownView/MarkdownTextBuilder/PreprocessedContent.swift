@@ -27,7 +27,11 @@ public extension MarkdownTextView {
         public init(parserResult: MarkdownParser.ParseResult, theme: MarkdownTheme) {
             blocks = parserResult.document
             rendered = parserResult.render(theme: theme)
-            highlightMaps = parserResult.render(theme: theme)
+            // Skip Highlightr syntax highlighting entirely — the regex engine
+            // causes O(n²) CPU + memory on large code blocks (1000+ lines),
+            // leading to 3GB+ memory and text disappearing. Code blocks still
+            // render with monospaced font in their card UI, just no color tokens.
+            highlightMaps = [:]
         }
 
         public init() {

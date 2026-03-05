@@ -9,7 +9,6 @@ import MarkdownParser
 import SwiftUI
 
 /// Background queue for markdown parsing — pure computation, thread-safe.
-/// Moving parsing off the main thread prevents blocking UI during streaming.
 private let markdownParseQueue = DispatchQueue(
     label: "MarkdownView.ParseQueue",
     qos: .userInteractive
@@ -36,11 +35,10 @@ extension MarkdownViewRepresentableBase {
     func updateMarkdownTextView(_ view: MarkdownTextView, coordinator: MarkdownViewCoordinator) {
         switch contentSource {
         case let .text(text):
-            // Phase 1: Fast content hash guard — skip entirely if unchanged
+            // Fast content hash guard — skip entirely if unchanged
             let textHash = text.hashValue
             let themeChanged = coordinator.lastTheme != theme
             guard textHash != coordinator.lastTextHash || themeChanged else {
-                // Content identical — just update height (width may have changed)
                 updateMeasuredHeight(for: view)
                 return
             }
@@ -54,25 +52,39 @@ extension MarkdownViewRepresentableBase {
                 coordinator.lastTheme = theme
             }
 
-            // Phase 2: Parse markdown on background thread, then deliver
-            // to the throttled Combine pipeline on main thread.
-            // MarkdownParser is pure computation — no UIKit dependencies.
+            // CRITICAL FIX: Cancel any previous in-flight parse work item.
+            // Without this, every streaming token queues a new full parse
+            // on the serial background queue. With 1000-line code blocks,
+            // each parse creates ~10MB of PreprocessedContent (AST + 
+            // NSAttributedStrings + highlight maps). At 20 tokens/sec with
+            // 200ms parse time, the queue grows unboundedly → 3GB+ memory.
+            coordinator.pendingParseWork?.cancel()
+
             let currentTheme = theme
-            markdownParseQueue.async {
+            let workItem = DispatchWorkItem { [weak coordinator] in
+                // Check if this work was cancelled before doing expensive work
+                guard let coordinator, !coordinator.isCancelled else { return }
+
                 let parser = MarkdownParser()
                 let result = parser.parse(text)
+
+                // Check again after parse (may have been cancelled during parse)
+                guard !coordinator.isCancelled else { return }
+
                 let content = MarkdownTextView.PreprocessedContent(
                     parserResult: result, theme: currentTheme)
+
                 DispatchQueue.main.async {
-                    // Phase 1: Use setMarkdown() (throttled Combine pipeline)
-                    // instead of setMarkdownManually() (bypasses throttle).
-                    // This engages the built-in 20fps throttle so even if
-                    // SwiftUI calls updateView 50x/sec, only ~20 renders execute.
+                    // Final check — content may have changed while we were parsing
+                    guard coordinator?.lastTextHash == textHash else { return }
                     view.setMarkdown(content)
                     view.invalidateIntrinsicContentSize()
                     self.updateMeasuredHeight(for: view)
                 }
             }
+
+            coordinator.pendingParseWork = workItem
+            markdownParseQueue.async(execute: workItem)
 
         case let .preprocessed(preprocessedContent):
             let needsUpdate = coordinator.lastPreprocessedContent !== preprocessedContent
@@ -82,7 +94,6 @@ extension MarkdownViewRepresentableBase {
                 coordinator.lastTextHash = 0
                 coordinator.lastPreprocessedContent = preprocessedContent
                 view.theme = theme
-                // Pre-processed content is already parsed — use throttled path
                 view.setMarkdown(preprocessedContent)
                 view.invalidateIntrinsicContentSize()
                 coordinator.lastTheme = theme
