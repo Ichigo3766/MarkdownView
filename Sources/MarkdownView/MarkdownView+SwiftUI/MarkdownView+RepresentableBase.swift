@@ -76,7 +76,7 @@ extension MarkdownViewRepresentableBase {
 
                 DispatchQueue.main.async {
                     // Final check — content may have changed while we were parsing
-                    guard coordinator?.lastTextHash == textHash else { return }
+                    guard coordinator.lastTextHash == textHash else { return }
                     view.setMarkdown(content)
                     view.invalidateIntrinsicContentSize()
                     self.updateMeasuredHeight(for: view)
