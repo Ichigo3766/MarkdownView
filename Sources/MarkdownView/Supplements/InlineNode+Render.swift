@@ -59,10 +59,7 @@ extension MarkdownInlineNode {
             let ans = NSMutableAttributedString()
             children.map { $0.render(theme: theme, context: context, viewProvider: viewProvider) }.forEach { ans.append($0) }
             ans.addAttributes(
-                [
-                    .underlineStyle: NSUnderlineStyle.thick.rawValue,
-                    .underlineColor: theme.colors.emphasis,
-                ],
+                [.font: theme.fonts.italic],
                 range: NSRange(location: 0, length: ans.length)
             )
             return ans

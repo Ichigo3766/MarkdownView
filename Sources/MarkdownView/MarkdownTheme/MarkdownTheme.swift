@@ -99,6 +99,18 @@ public struct MarkdownTheme: Equatable {
         public var general: CGFloat = 8
         public var list: CGFloat = 8
         public var cell: CGFloat = 32
+        /// Spacing between paragraphs (after each paragraph block).
+        /// Previously hardcoded to 16 in BlockProcessor.
+        public var paragraphSpacing: CGFloat = 8
+        /// Line spacing within a paragraph.
+        /// Previously hardcoded to 4 in BlockProcessor.
+        public var lineSpacing: CGFloat = 2
+        /// Spacing before/after headings.
+        public var headingSpacing: CGFloat = 12
+        /// Spacing inside blockquotes.
+        public var blockquoteSpacing: CGFloat = 4
+        /// Head indent for blockquotes.
+        public var blockquoteIndent: CGFloat = 12
     }
 
     public var spacings: Spacings = .init()

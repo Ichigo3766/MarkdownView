@@ -48,8 +48,8 @@ final class BlockProcessor {
         let font: PlatformFont = theme.fonts.title
 
         return buildWithParagraphSync { paragraph in
-            paragraph.paragraphSpacing = 16
-            paragraph.paragraphSpacingBefore = 16
+            paragraph.paragraphSpacing = theme.spacings.headingSpacing
+            paragraph.paragraphSpacingBefore = theme.spacings.headingSpacing
         } content: {
             let string = contents.render(theme: theme, context: context, viewProvider: viewProvider)
             string.addAttributes(
@@ -62,8 +62,8 @@ final class BlockProcessor {
 
     func processParagraph(contents: [MarkdownInlineNode]) -> NSAttributedString {
         buildWithParagraphSync { paragraph in
-            paragraph.paragraphSpacing = 16
-            paragraph.lineSpacing = 4
+            paragraph.paragraphSpacing = theme.spacings.paragraphSpacing
+            paragraph.lineSpacing = theme.spacings.lineSpacing
         } content: {
             let rendered = contents.render(theme: theme, context: context, viewProvider: viewProvider)
             if rendered.length == 0 {
@@ -118,11 +118,11 @@ final class BlockProcessor {
         let result = NSMutableAttributedString()
 
         let baseParagraphStyle = NSMutableParagraphStyle()
-        baseParagraphStyle.firstLineHeadIndent = 16
-        baseParagraphStyle.headIndent = 16
+        baseParagraphStyle.firstLineHeadIndent = theme.spacings.blockquoteIndent
+        baseParagraphStyle.headIndent = theme.spacings.blockquoteIndent
         baseParagraphStyle.tailIndent = -4
-        baseParagraphStyle.paragraphSpacing = 8
-        baseParagraphStyle.lineSpacing = 4
+        baseParagraphStyle.paragraphSpacing = theme.spacings.blockquoteSpacing
+        baseParagraphStyle.lineSpacing = theme.spacings.lineSpacing
 
         for child in children {
             guard case let .paragraph(content) = child else {
@@ -203,8 +203,8 @@ extension BlockProcessor {
         content: () -> NSMutableAttributedString
     ) -> NSMutableAttributedString {
         var paragraphStyle: NSMutableParagraphStyle = .init()
-        paragraphStyle.paragraphSpacing = 16
-        paragraphStyle.lineSpacing = 4
+        paragraphStyle.paragraphSpacing = theme.spacings.paragraphSpacing
+        paragraphStyle.lineSpacing = theme.spacings.lineSpacing
         modifier(&paragraphStyle)
 
         let string = content()
