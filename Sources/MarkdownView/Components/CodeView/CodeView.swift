@@ -172,7 +172,10 @@ import Litext
             let font = theme.fonts.code
             lineNumberView.textColor = theme.colors.body.withAlphaComponent(0.5)
 
-            let lineCount = max(content.components(separatedBy: .newlines).count, 1)
+            // Use truncated content's line count (matches what's displayed),
+            // not full content which may have hundreds more lines
+            let displayContent = Self.truncateIfNeeded(content)
+            let lineCount = max(displayContent.components(separatedBy: .newlines).count, 1)
             let textViewContentHeight = textView.intrinsicContentSize.height
 
             lineNumberView.configure(

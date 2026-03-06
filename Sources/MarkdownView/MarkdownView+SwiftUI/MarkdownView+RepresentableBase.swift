@@ -32,6 +32,14 @@ extension MarkdownViewRepresentableBase {
             }
             if let url { UIApplication.shared.open(url) }
         }
+        view.codePreviewHandler = { language, attributedString in
+            let code = attributedString.string
+            NotificationCenter.default.post(
+                name: .markdownCodePreview,
+                object: nil,
+                userInfo: ["code": code, "language": language ?? ""]
+            )
+        }
         #endif
         return view
     }
