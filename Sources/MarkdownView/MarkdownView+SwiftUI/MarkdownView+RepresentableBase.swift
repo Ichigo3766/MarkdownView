@@ -30,7 +30,13 @@ extension MarkdownViewRepresentableBase {
             case .url(let u): url = u
             case .string(let s): url = URL(string: s)
             }
-            if let url { UIApplication.shared.open(url) }
+            if let url {
+                NotificationCenter.default.post(
+                    name: .markdownLinkTapped,
+                    object: nil,
+                    userInfo: ["url": url]
+                )
+            }
         }
         view.codePreviewHandler = { language, attributedString in
             let code = attributedString.string
