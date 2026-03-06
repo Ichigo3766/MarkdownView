@@ -17,6 +17,10 @@ enum CodeViewConfiguration {
     static let codeLineSpacing: CGFloat = 4
     static let lineNumberWidth: CGFloat = 40
     static let lineNumberPadding: CGFloat = 8
+    /// Maximum height for code block content area (excluding bar).
+    /// At 3x Retina, 4000pt = 12,000px — safely under iOS's Metal
+    /// texture limit of 16,384px. Taller code blocks scroll vertically.
+    static let maxCodeContentHeight: CGFloat = 4000
 
     static func intrinsicHeight(
         for content: String,
@@ -87,7 +91,7 @@ enum CodeViewConfiguration {
         }
 
         private func setupScrollView() {
-            scrollView.showsVerticalScrollIndicator = false
+            scrollView.showsVerticalScrollIndicator = true
             scrollView.showsHorizontalScrollIndicator = false
             scrollView.alwaysBounceVertical = false
             scrollView.alwaysBounceHorizontal = false
@@ -185,7 +189,7 @@ enum CodeViewConfiguration {
 
             scrollView.contentSize = CGSize(
                 width: textView.frame.width + CodeViewConfiguration.codePadding * 2,
-                height: 0
+                height: textView.frame.height + CodeViewConfiguration.codePadding * 2
             )
         }
     }

@@ -27,18 +27,33 @@ import Litext
 
         var highlightMap: CodeHighlighter.HighlightMap = .init()
 
+        /// Maximum lines to display. Beyond this, the CALayer backing store
+        /// exceeds iOS's Metal texture limit (16,384px at 3x).
+        /// 400 lines × ~18pt × 3x = ~21,600px — still within limit with
+        /// some margin for line spacing and padding.
+        private static let maxDisplayLines = 400
+
         var content: String = "" {
             didSet {
                 guard oldValue != content else { return }
-                // Render with current highlight map (may be empty for new blocks,
-                // or populated from cache for completed blocks)
-                textView.attributedText = highlightMap.apply(to: content, with: theme)
-                lineNumberView.updateForContent(content)
+                // Truncate very long code to avoid Metal texture limit crash.
+                // The full content is still available via copy button.
+                let displayContent = Self.truncateIfNeeded(content)
+                textView.attributedText = highlightMap.apply(to: displayContent, with: theme)
+                lineNumberView.updateForContent(displayContent)
                 updateLineNumberView()
-                // Trigger async highlight with debounce — waits for content to
-                // stabilize before highlighting to avoid flicker during streaming
                 triggerAsyncHighlight()
             }
+        }
+
+        /// Truncates content to maxDisplayLines to stay within GPU texture limits.
+        /// Full content is preserved in `content` for copy/export.
+        private static func truncateIfNeeded(_ text: String) -> String {
+            let lines = text.components(separatedBy: "\n")
+            guard lines.count > maxDisplayLines else { return text }
+            let truncated = lines.prefix(maxDisplayLines).joined(separator: "\n")
+            let remaining = lines.count - maxDisplayLines
+            return truncated + "\n\n// ... \(remaining) more lines (use copy button to get full code)"
         }
 
         // MARK: CONTENT -
@@ -59,6 +74,7 @@ import Litext
         private func triggerAsyncHighlight() {
             highlightTask?.cancel()
             let capturedContent = content
+            let displayContent = Self.truncateIfNeeded(capturedContent)
             let capturedLanguage = language
             let capturedTheme = theme
             highlightTask = Task { [weak self] in
@@ -67,7 +83,7 @@ import Litext
                 guard !Task.isCancelled else { return }
 
                 let map = await CodeHighlighter.current.highlightAsync(
-                    content: capturedContent,
+                    content: displayContent,
                     language: capturedLanguage,
                     theme: capturedTheme
                 )
@@ -75,7 +91,7 @@ import Litext
                       self.content == capturedContent else { return }
                 await MainActor.run {
                     self.highlightMap = map
-                    self.textView.attributedText = map.apply(to: capturedContent, with: capturedTheme)
+                    self.textView.attributedText = map.apply(to: displayContent, with: capturedTheme)
                 }
             }
         }
@@ -125,14 +141,18 @@ import Litext
             let lineNumberWidth = lineNumberView.intrinsicContentSize.width
 
             // Use actual rendered text height — not the formula-based estimate.
-            // The formula (lineHeight × rows) overestimates, leaving dead space
-            // at the bottom of code blocks.
+            // Cap at maxCodeContentHeight to stay under iOS's Metal texture limit
+            // (16,384px at 3x = ~5,461pt). Taller code blocks scroll vertically.
+            let codeContentHeight = min(
+                textSize.height + CodeViewConfiguration.codePadding * 2,
+                CodeViewConfiguration.maxCodeContentHeight
+            )
             return CGSize(
                 width: max(
                     labelSize.width + CodeViewConfiguration.barPadding * 2,
                     lineNumberWidth + textSize.width + CodeViewConfiguration.codePadding * 2
                 ),
-                height: barHeight + textSize.height + CodeViewConfiguration.codePadding * 2
+                height: barHeight + codeContentHeight
             )
         }
 
