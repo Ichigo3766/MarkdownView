@@ -27,11 +27,13 @@ import Litext
 
         var highlightMap: CodeHighlighter.HighlightMap = .init()
 
-        /// Maximum lines to display. Beyond this, the CALayer backing store
-        /// exceeds iOS's Metal texture limit (16,384px at 3x).
-        /// 400 lines × ~18pt × 3x = ~21,600px — still within limit with
-        /// some margin for line spacing and padding.
-        private static let maxDisplayLines = 400
+        /// Maximum lines to display before truncation.
+        /// With the height cap (maxCodeViewHeight = 500pt), tall code blocks
+        /// scroll internally. But the LTXLabel still needs a CALayer for the
+        /// full text height. 150 lines × ~18pt × 3x ≈ 8,100px → ~13MB
+        /// backing store (vs. 400 lines = ~26,400px → ~117MB).
+        /// The full content is preserved in `content` for copy/preview.
+        private static let maxDisplayLines = 150
 
         var content: String = "" {
             didSet {
@@ -140,15 +142,18 @@ import Litext
             let textSize = textView.intrinsicContentSize
             let lineNumberWidth = lineNumberView.intrinsicContentSize.width
 
-            // Use actual rendered text height — not the formula-based estimate.
-            // Content is truncated to maxDisplayLines in the content setter,
-            // so the height naturally stays within iOS's Metal texture limit.
+            let naturalHeight = barHeight + textSize.height + CodeViewConfiguration.codePadding * 2
+            // Cap total height to prevent massive CALayer backing stores.
+            // A 400-line code block at 3x Retina would be ~8,800pt = 26,400px
+            // → ~117MB backing store. Capping at 500pt = 1,500px → ~2.5MB.
+            // Content beyond the cap scrolls vertically inside the scrollView.
+            let cappedHeight = min(naturalHeight, CodeViewConfiguration.maxCodeViewHeight)
             return CGSize(
                 width: max(
                     labelSize.width + CodeViewConfiguration.barPadding * 2,
                     lineNumberWidth + textSize.width + CodeViewConfiguration.codePadding * 2
                 ),
-                height: barHeight + textSize.height + CodeViewConfiguration.codePadding * 2
+                height: cappedHeight
             )
         }
 

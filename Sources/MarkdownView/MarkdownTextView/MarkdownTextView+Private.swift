@@ -37,6 +37,15 @@ extension MarkdownTextView {
         // thus we hereby call the autoreleasepool to avoid large memory consumption
         autoreleasepool { updateTextExecute() }
 
+        // MEMORY FIX: After updateTextExecute() bakes the AST and math images
+        // into the NSAttributedString, the PreprocessedContent's heavyweight data
+        // (MarkdownBlockNode tree, rendered math UIImages, highlight maps) is no
+        // longer needed. Replace with an empty instance to free that memory.
+        // For a message with code blocks + math, this saves ~2-10MB per message.
+        // The coordinator's lastText/lastPreprocessedContent handles diffing,
+        // so clearing `document` here is safe.
+        document = PreprocessedContent()
+
         #if canImport(UIKit)
             layoutIfNeeded()
         #elseif canImport(AppKit)

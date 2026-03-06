@@ -17,10 +17,12 @@ enum CodeViewConfiguration {
     static let codeLineSpacing: CGFloat = 4
     static let lineNumberWidth: CGFloat = 40
     static let lineNumberPadding: CGFloat = 8
-    /// Maximum height for code block content area (excluding bar).
-    /// At 3x Retina, 4000pt = 12,000px — safely under iOS's Metal
-    /// texture limit of 16,384px. Taller code blocks scroll vertically.
-    static let maxCodeContentHeight: CGFloat = 4000
+    /// Maximum height for the entire CodeView (bar + content).
+    /// Capped to prevent massive CALayer backing stores that consume
+    /// hundreds of MB of GPU memory. At 3x Retina, 500pt = 1,500px
+    /// → ~2.5MB backing store (vs. 8,800pt = ~117MB uncapped).
+    /// Content beyond this height scrolls vertically inside the CodeView.
+    static let maxCodeViewHeight: CGFloat = 500
 
     static func intrinsicHeight(
         for content: String,
@@ -91,10 +93,14 @@ enum CodeViewConfiguration {
         }
 
         private func setupScrollView() {
-            scrollView.showsVerticalScrollIndicator = false
+            scrollView.showsVerticalScrollIndicator = true
             scrollView.showsHorizontalScrollIndicator = false
             scrollView.alwaysBounceVertical = false
             scrollView.alwaysBounceHorizontal = false
+            // Lock to one axis at a time — prevents diagonal/2D panning.
+            // The user can scroll vertically OR horizontally, but not both
+            // simultaneously. Once a direction is detected, the other is locked.
+            scrollView.isDirectionalLockEnabled = true
             addSubview(scrollView)
         }
 
@@ -189,7 +195,7 @@ enum CodeViewConfiguration {
 
             scrollView.contentSize = CGSize(
                 width: textView.frame.width + CodeViewConfiguration.codePadding * 2,
-                height: 0
+                height: textView.frame.height + CodeViewConfiguration.codePadding * 2
             )
         }
     }
