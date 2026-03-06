@@ -53,7 +53,7 @@ import Litext
             guard lines.count > maxDisplayLines else { return text }
             let truncated = lines.prefix(maxDisplayLines).joined(separator: "\n")
             let remaining = lines.count - maxDisplayLines
-            return truncated + "\n\n// ... \(remaining) more lines"
+            return truncated + "\n\n// ··· \(remaining) more lines ···"
         }
 
         // MARK: CONTENT -
@@ -163,7 +163,9 @@ import Litext
             #if !os(visionOS)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             #endif
-            previewAction?(language, textView.attributedText)
+            // Pass full content (not truncated) for fullscreen preview
+            let fullAttr = highlightMap.apply(to: content, with: theme)
+            previewAction?(language, fullAttr)
         }
 
         func updateLineNumberView() {
