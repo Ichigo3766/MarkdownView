@@ -30,11 +30,13 @@ import Litext
         var content: String = "" {
             didSet {
                 guard oldValue != content else { return }
-                // Render immediately with whatever highlight map we have (may be empty)
+                // Render with current highlight map (may be empty for new blocks,
+                // or populated from cache for completed blocks)
                 textView.attributedText = highlightMap.apply(to: content, with: theme)
                 lineNumberView.updateForContent(content)
                 updateLineNumberView()
-                // Trigger lazy async highlighting — colors appear after ~50ms
+                // Trigger async highlight with debounce — waits for content to
+                // stabilize before highlighting to avoid flicker during streaming
                 triggerAsyncHighlight()
             }
         }
@@ -46,13 +48,14 @@ import Litext
 
         /// Triggers async syntax highlighting via HighlightSwift.
         /// Code renders immediately as plain monospaced text, then colors
-        /// fade in when highlighting completes.
+        /// appear when highlighting completes.
         ///
         /// **Debounced**: Waits 300ms after the last content change before
-        /// triggering. During streaming, content changes every ~50ms — without
-        /// debouncing, each token would cancel+restart the highlight, causing
-        /// visible color flickering. The 300ms delay ensures highlighting only
-        /// runs once content has stabilized.
+        /// triggering. During streaming, content changes every ~50ms — each
+        /// change cancels the previous timer, so highlighting only runs once
+        /// streaming stops and content stabilizes. This is intentional:
+        /// MarkdownTextView re-creates CodeView instances on every update,
+        /// so mid-stream highlighting would cause colored→plain→colored flicker.
         private func triggerAsyncHighlight() {
             highlightTask?.cancel()
             let capturedContent = content
