@@ -53,7 +53,7 @@ import Litext
             guard lines.count > maxDisplayLines else { return text }
             let truncated = lines.prefix(maxDisplayLines).joined(separator: "\n")
             let remaining = lines.count - maxDisplayLines
-            return truncated + "\n\n// ... \(remaining) more lines (use copy button to get full code)"
+            return truncated + "\n\n// ... \(remaining) more lines"
         }
 
         // MARK: CONTENT -
@@ -141,18 +141,14 @@ import Litext
             let lineNumberWidth = lineNumberView.intrinsicContentSize.width
 
             // Use actual rendered text height — not the formula-based estimate.
-            // Cap at maxCodeContentHeight to stay under iOS's Metal texture limit
-            // (16,384px at 3x = ~5,461pt). Taller code blocks scroll vertically.
-            let codeContentHeight = min(
-                textSize.height + CodeViewConfiguration.codePadding * 2,
-                CodeViewConfiguration.maxCodeContentHeight
-            )
+            // Content is truncated to maxDisplayLines in the content setter,
+            // so the height naturally stays within iOS's Metal texture limit.
             return CGSize(
                 width: max(
                     labelSize.width + CodeViewConfiguration.barPadding * 2,
                     lineNumberWidth + textSize.width + CodeViewConfiguration.codePadding * 2
                 ),
-                height: barHeight + codeContentHeight
+                height: barHeight + textSize.height + CodeViewConfiguration.codePadding * 2
             )
         }
 

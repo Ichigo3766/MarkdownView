@@ -91,7 +91,7 @@ enum CodeViewConfiguration {
         }
 
         private func setupScrollView() {
-            scrollView.showsVerticalScrollIndicator = true
+            scrollView.showsVerticalScrollIndicator = false
             scrollView.showsHorizontalScrollIndicator = false
             scrollView.alwaysBounceVertical = false
             scrollView.alwaysBounceHorizontal = false
@@ -189,7 +189,7 @@ enum CodeViewConfiguration {
 
             scrollView.contentSize = CGSize(
                 width: textView.frame.width + CodeViewConfiguration.codePadding * 2,
-                height: textView.frame.height + CodeViewConfiguration.codePadding * 2
+                height: 0
             )
         }
     }
