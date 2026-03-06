@@ -31,9 +31,6 @@ A powerful pure UIKit framework for rendering Markdown documents with real-time 
 ### 🔧 Code Block Height Fix
 - Code blocks use actual `intrinsicContentSize` instead of a formula-based height calculation — fixes extra bottom whitespace
 
-### 📏 Correct Height Measurement
-- Restored `DispatchQueue.main.async` in `updateMeasuredHeight` — required for correct SwiftUI `@State` updates during view update cycle (removing it causes invisible content)
-
 ## Preview
 
 ![Preview](./Resources/Simulator%20Screenshot%20-%20iPad%20mini%20(A17%20Pro)%20-%202025-05-27%20at%2003.03.27.png)
