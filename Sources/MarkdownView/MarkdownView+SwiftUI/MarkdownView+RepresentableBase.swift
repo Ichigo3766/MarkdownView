@@ -23,6 +23,16 @@ extension MarkdownViewRepresentableBase {
         view.setContentCompressionResistancePriority(.required, for: .vertical)
         view.setContentHuggingPriority(.defaultLow, for: .horizontal)
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        #if canImport(UIKit)
+        view.linkHandler = { payload, _, _ in
+            let url: URL?
+            switch payload {
+            case .url(let u): url = u
+            case .string(let s): url = URL(string: s)
+            }
+            if let url { UIApplication.shared.open(url) }
+        }
+        #endif
         return view
     }
 
