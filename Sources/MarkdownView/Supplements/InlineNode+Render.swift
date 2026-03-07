@@ -38,7 +38,13 @@ extension MarkdownInlineNode {
                 ]
             )
         case .softBreak:
-            return NSAttributedString(string: " ", attributes: [
+            // Use Unicode Line Separator (U+2028) — NOT paragraph separator (\n).
+            // In CoreText, \n triggers paragraphSpacing (big gap) while \u{2028}
+            // only triggers lineSpacing (small gap). This gives us:
+            //   - Lines within a stanza: tight spacing (lineSpacing ~4pt)
+            //   - Between stanzas (\n\n = separate paragraph blocks): big gap (paragraphSpacing 16pt)
+            // This matches Open WebUI / ChatGPT rendering of poems and structured content.
+            return NSAttributedString(string: "\u{2028}", attributes: [
                 .font: theme.fonts.body,
                 .foregroundColor: theme.colors.body,
             ])

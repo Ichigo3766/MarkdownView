@@ -74,11 +74,16 @@ final class BlockProcessor {
     }
 
     func processThematicBreak() -> NSAttributedString {
-        buildWithParagraphSync {
+        buildWithParagraphSync { paragraph in
+            // Compact spacing for thematic breaks — the line itself provides
+            // visual separation, so we don't need large paragraph gaps on top.
+            paragraph.paragraphSpacing = 4
+            paragraph.paragraphSpacingBefore = 4
+        } content: {
             let drawingCallback = self.thematicBreakDrawing
             return .init(string: LTXReplacementText, attributes: [
                 .font: theme.fonts.body,
-                .ltxAttachment: LTXAttachment.hold(attrString: .init(string: "\n\n")),
+                .ltxAttachment: LTXAttachment.hold(attrString: .init(string: "\n")),
                 .ltxLineDrawingCallback: LTXLineDrawingAction(action: { context, line, lineOrigin in
                     drawingCallback?(context, line, lineOrigin)
                 }),

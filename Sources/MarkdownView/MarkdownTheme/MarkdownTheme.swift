@@ -100,11 +100,13 @@ public struct MarkdownTheme: Equatable {
         public var list: CGFloat = 8
         public var cell: CGFloat = 32
         /// Spacing between paragraphs (after each paragraph block).
-        /// Previously hardcoded to 16 in BlockProcessor.
-        public var paragraphSpacing: CGFloat = 8
-        /// Line spacing within a paragraph.
-        /// Previously hardcoded to 4 in BlockProcessor.
-        public var lineSpacing: CGFloat = 2
+        /// Controls the visible gap between stanzas, sections, etc.
+        /// 16pt provides a clear visual break matching Open WebUI's web rendering.
+        public var paragraphSpacing: CGFloat = 16
+        /// Line spacing within a paragraph (between soft-break lines).
+        /// 4pt gives comfortable readability for poem lines within a stanza,
+        /// while still being visually distinct from the 16pt paragraph gap.
+        public var lineSpacing: CGFloat = 4
         /// Spacing before/after headings.
         public var headingSpacing: CGFloat = 12
         /// Spacing inside blockquotes.
