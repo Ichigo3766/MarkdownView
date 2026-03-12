@@ -20,7 +20,6 @@ private let mathPattern: NSRegularExpression? = {
         pattern: pattern,
         options: [
             .caseInsensitive,
-            .allowCommentsAndWhitespace,
         ]
     ) else {
         assertionFailure("failed to create regex for math pattern")
@@ -99,7 +98,6 @@ private let mathPatternWithinBlock: NSRegularExpression? = {
         pattern: pattern,
         options: [
             .caseInsensitive,
-            .allowCommentsAndWhitespace,
         ]
     ) else {
         assertionFailure("failed to create regex for math pattern")
