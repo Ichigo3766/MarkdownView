@@ -86,15 +86,43 @@ extension MarkdownInlineNode {
             )
             return ans
         case let .link(destination, children):
+            // Citation pill badge: links ending with #cite get special small styling
+            let isCitation = destination.hasSuffix("#cite")
+            let cleanDestination = isCitation ? String(destination.dropLast(5)) : destination
+
             let ans = NSMutableAttributedString()
             children.map { $0.render(theme: theme, context: context, viewProvider: viewProvider) }.forEach { ans.append($0) }
-            ans.addAttributes(
-                [
-                    .link: destination,
-                    .foregroundColor: theme.colors.highlight,
-                ],
-                range: NSRange(location: 0, length: ans.length)
-            )
+
+            if isCitation {
+                // Small subscript-style pill badge for inline citations
+                let citationFont = theme.fonts.body.withSize(theme.fonts.body.pointSize * 0.65)
+                ans.addAttributes(
+                    [
+                        .link: cleanDestination,
+                        .foregroundColor: theme.colors.highlight,
+                        .font: citationFont,
+                        .baselineOffset: theme.fonts.body.pointSize * 0.25,
+                        .backgroundColor: theme.colors.highlight.withAlphaComponent(0.12),
+                    ],
+                    range: NSRange(location: 0, length: ans.length)
+                )
+                // Pad with thin spaces for pill appearance
+                let thinSpace = NSAttributedString(string: "\u{2009}", attributes: [
+                    .font: citationFont,
+                    .baselineOffset: theme.fonts.body.pointSize * 0.25,
+                    .backgroundColor: theme.colors.highlight.withAlphaComponent(0.12),
+                ])
+                ans.insert(thinSpace, at: 0)
+                ans.append(thinSpace)
+            } else {
+                ans.addAttributes(
+                    [
+                        .link: cleanDestination,
+                        .foregroundColor: theme.colors.highlight,
+                    ],
+                    range: NSRange(location: 0, length: ans.length)
+                )
+            }
             return ans
         case let .image(source, _): // children => alternative text can be ignored?
             return NSAttributedString(
