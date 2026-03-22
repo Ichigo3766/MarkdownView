@@ -100,7 +100,7 @@ final class BlockProcessor {
         let codeView = viewProvider.acquireCodeView()
         codeView.theme = theme
         codeView.language = language ?? ""
-        codeView.highlightMap = highlightMap
+        if !highlightMap.isEmpty { codeView.highlightMap = highlightMap }
         codeView.content = content
         let drawer = codeDrawing!
         let text = buildWithParagraphSync { paragraph in

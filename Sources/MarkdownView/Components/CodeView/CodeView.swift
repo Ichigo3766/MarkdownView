@@ -38,8 +38,6 @@ import Litext
         var content: String = "" {
             didSet {
                 guard oldValue != content else { return }
-                // Truncate very long code to avoid Metal texture limit crash.
-                // The full content is still available via copy button.
                 let displayContent = Self.truncateIfNeeded(content)
                 textView.attributedText = highlightMap.apply(to: displayContent, with: theme)
                 lineNumberView.updateForContent(displayContent)
@@ -63,16 +61,6 @@ import Litext
         /// Tracks the current async highlight task so we can cancel stale ones
         private var highlightTask: Task<Void, Never>?
 
-        /// Triggers async syntax highlighting via HighlightSwift.
-        /// Code renders immediately as plain monospaced text, then colors
-        /// appear when highlighting completes.
-        ///
-        /// **Debounced**: Waits 300ms after the last content change before
-        /// triggering. During streaming, content changes every ~50ms — each
-        /// change cancels the previous timer, so highlighting only runs once
-        /// streaming stops and content stabilizes. This is intentional:
-        /// MarkdownTextView re-creates CodeView instances on every update,
-        /// so mid-stream highlighting would cause colored→plain→colored flicker.
         private func triggerAsyncHighlight() {
             highlightTask?.cancel()
             let capturedContent = content
@@ -80,7 +68,6 @@ import Litext
             let capturedLanguage = language
             let capturedTheme = theme
             highlightTask = Task { [weak self] in
-                // Debounce: wait 300ms for content to stabilize
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 guard !Task.isCancelled else { return }
 
