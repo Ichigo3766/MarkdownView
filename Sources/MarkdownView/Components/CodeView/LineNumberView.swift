@@ -41,6 +41,12 @@ import Litext
             }
         }
 
+        /// The scrollView's current vertical contentOffset.
+        /// Set from UIScrollViewDelegate to keep line numbers in sync with scrolled code.
+        var contentOffsetY: CGFloat = 0 {
+            didSet { setNeedsDisplay() }
+        }
+
         override init(frame: CGRect) {
             super.init(frame: frame)
             setupView()
@@ -81,7 +87,9 @@ import Litext
 
             let availableHeight = contentHeight
             let lineSpacing = availableHeight / CGFloat(lineCount)
-            let startY = padding.top
+            // Shift line numbers upward by the scroll offset so they stay
+            // aligned with the corresponding code line in the scrollView.
+            let startY = padding.top - contentOffsetY
 
             for lineNumber in 1 ... lineCount {
                 let numberString = "\(lineNumber)"
@@ -89,6 +97,9 @@ import Litext
 
                 let x = bounds.width - padding.right - textSize.width
                 let y = startY + CGFloat(lineNumber - 1) * lineSpacing + (lineSpacing - textSize.height) / 2
+
+                // Only draw if within the visible bounds
+                guard y + textSize.height > 0, y < bounds.height else { continue }
 
                 let textRect = CGRect(
                     x: x,

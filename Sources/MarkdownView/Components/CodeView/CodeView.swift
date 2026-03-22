@@ -238,6 +238,11 @@ import Litext
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateScrollFABVisibility()
+            // Keep the line number view vertically aligned with the scrolled content.
+            // lineNumberView sits outside the scrollView (as a sibling) so we must
+            // manually offset it to match the scrollView's vertical contentOffset.
+            let offsetY = scrollView.contentOffset.y
+            lineNumberView.contentOffsetY = offsetY
         }
     }
 
