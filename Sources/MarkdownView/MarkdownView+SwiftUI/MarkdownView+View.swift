@@ -18,6 +18,9 @@ public struct MarkdownView: View {
 
     let contentSource: ContentSource
     public var theme: MarkdownTheme
+    /// When true, all code blocks inside this MarkdownView auto-scroll to their bottom.
+    /// Set true during streaming, false when streaming ends.
+    public var codeBlockAutoScroll: Bool = false
 
     @State private var measuredHeight: CGFloat = 0
 
@@ -31,12 +34,20 @@ public struct MarkdownView: View {
         self.theme = theme
     }
 
+    /// Fluent setter for codeBlockAutoScroll.
+    public func codeAutoScroll(_ enabled: Bool) -> MarkdownView {
+        var copy = self
+        copy.codeBlockAutoScroll = enabled
+        return copy
+    }
+
     public var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
                 MarkdownViewRepresentable(
                     contentSource: contentSource,
                     theme: theme,
+                    codeBlockAutoScroll: codeBlockAutoScroll,
                     width: proxy.size.width,
                     measuredHeight: $measuredHeight
                 )

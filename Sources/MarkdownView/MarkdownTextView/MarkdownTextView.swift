@@ -91,6 +91,16 @@ import MarkdownParser
         public func bindContentOffset(from scrollView: UIScrollView?) {
             trackedScrollView = scrollView
         }
+
+        /// Enables or disables auto-scroll-to-bottom on all CodeView subviews.
+        /// Call with `true` during streaming, `false` when streaming ends.
+        public func setCodeBlockAutoScroll(_ enabled: Bool) {
+            for view in contextViews {
+                if let codeView = view as? CodeView {
+                    codeView.autoScrollEnabled = enabled
+                }
+            }
+        }
     }
 
 #elseif canImport(AppKit)

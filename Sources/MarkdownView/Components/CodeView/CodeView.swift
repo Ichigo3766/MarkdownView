@@ -27,6 +27,48 @@ import Litext
 
         var highlightMap: CodeHighlighter.HighlightMap = .init()
 
+        // MARK: - Auto-Scroll
+
+        /// When true, the code block scrolls to the bottom whenever new content arrives.
+        /// Set to false when the user manually scrolls up; the FAB re-enables it.
+        var autoScrollEnabled: Bool = false {
+            didSet { updateScrollFABVisibility() }
+        }
+
+        private lazy var scrollFAB: UIButton = {
+            let btn = UIButton(type: .system)
+            let img = UIImage(systemName: "arrow.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .bold))
+            btn.setImage(img, for: .normal)
+            btn.tintColor = .white
+            btn.backgroundColor = UIColor.systemGray.withAlphaComponent(0.7)
+            btn.layer.cornerRadius = 13
+            btn.layer.cornerCurve = .continuous
+            btn.clipsToBounds = true
+            btn.addTarget(self, action: #selector(scrollFABTapped), for: .touchUpInside)
+            btn.alpha = 0
+            return btn
+        }()
+
+        @objc private func scrollFABTapped() {
+            autoScrollEnabled = true
+            scrollToBottom(animated: true)
+        }
+
+        private func scrollToBottom(animated: Bool) {
+            let maxOffset = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+            guard maxOffset > 0 else { return }
+            scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: maxOffset), animated: animated)
+        }
+
+        private func updateScrollFABVisibility() {
+            let shouldShow = !autoScrollEnabled && scrollView.contentSize.height > scrollView.bounds.height
+            UIView.animate(withDuration: 0.2) {
+                self.scrollFAB.alpha = shouldShow ? 1 : 0
+            }
+        }
+
+        // MARK: - Content
+
         var content: String = "" {
             didSet {
                 guard oldValue != content else { return }
@@ -34,6 +76,12 @@ import Litext
                 lineNumberView.updateForContent(content)
                 updateLineNumberView()
                 triggerAsyncHighlight()
+                if autoScrollEnabled {
+                    // Defer scroll until after layout pass so contentSize is updated.
+                    DispatchQueue.main.async { [weak self] in
+                        self?.scrollToBottom(animated: false)
+                    }
+                }
             }
         }
 
@@ -86,6 +134,8 @@ import Litext
             super.init(frame: frame)
             configureSubviews()
             updateLineNumberView()
+            scrollView.delegate = self
+            addSubview(scrollFAB)
         }
 
         @available(*, unavailable)
@@ -101,6 +151,17 @@ import Litext
             super.layoutSubviews()
             performLayout()
             updateLineNumberView()
+            // Keep FAB pinned to bottom-right corner of the code block.
+            let fabSize: CGFloat = 26
+            let margin: CGFloat = 8
+            scrollFAB.frame = CGRect(
+                x: bounds.width - fabSize - margin,
+                y: bounds.height - fabSize - margin,
+                width: fabSize,
+                height: fabSize
+            )
+            bringSubviewToFront(scrollFAB)
+            updateScrollFABVisibility()
         }
 
         override var intrinsicContentSize: CGSize {
@@ -166,6 +227,17 @@ import Litext
     extension CodeView: LTXAttributeStringRepresentable {
         func attributedStringRepresentation() -> NSAttributedString {
             textView.attributedText
+        }
+    }
+
+    extension CodeView: UIScrollViewDelegate {
+        func scrollViewWillBeginDragging(_: UIScrollView) {
+            // User grabbed the scroll view — disable auto-scroll and show FAB.
+            autoScrollEnabled = false
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            updateScrollFABVisibility()
         }
     }
 

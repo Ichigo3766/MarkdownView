@@ -11,6 +11,7 @@ import SwiftUI
 protocol MarkdownViewRepresentableBase {
     var contentSource: MarkdownView.ContentSource { get }
     var theme: MarkdownTheme { get }
+    var codeBlockAutoScroll: Bool { get }
     var width: CGFloat { get }
     var heightBinding: Binding<CGFloat> { get }
 }
@@ -84,6 +85,9 @@ extension MarkdownViewRepresentableBase {
             view.invalidateIntrinsicContentSize()
             coordinator.lastTheme = theme
         }
+        #if canImport(UIKit)
+        view.setCodeBlockAutoScroll(codeBlockAutoScroll)
+        #endif
         updateMeasuredHeight(for: view)
     }
 
