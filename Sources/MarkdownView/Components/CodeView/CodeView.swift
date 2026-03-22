@@ -27,33 +27,14 @@ import Litext
 
         var highlightMap: CodeHighlighter.HighlightMap = .init()
 
-        /// Maximum lines to display before truncation.
-        /// With the height cap (maxCodeViewHeight = 500pt), tall code blocks
-        /// scroll internally. But the LTXLabel still needs a CALayer for the
-        /// full text height. 150 lines × ~18pt × 3x ≈ 8,100px → ~13MB
-        /// backing store (vs. 400 lines = ~26,400px → ~117MB).
-        /// The full content is preserved in `content` for copy/preview.
-        private static let maxDisplayLines = 150
-
         var content: String = "" {
             didSet {
                 guard oldValue != content else { return }
-                let displayContent = Self.truncateIfNeeded(content)
-                textView.attributedText = highlightMap.apply(to: displayContent, with: theme)
-                lineNumberView.updateForContent(displayContent)
+                textView.attributedText = highlightMap.apply(to: content, with: theme)
+                lineNumberView.updateForContent(content)
                 updateLineNumberView()
                 triggerAsyncHighlight()
             }
-        }
-
-        /// Truncates content to maxDisplayLines to stay within GPU texture limits.
-        /// Full content is preserved in `content` for copy/export.
-        private static func truncateIfNeeded(_ text: String) -> String {
-            let lines = text.components(separatedBy: "\n")
-            guard lines.count > maxDisplayLines else { return text }
-            let truncated = lines.prefix(maxDisplayLines).joined(separator: "\n")
-            let remaining = lines.count - maxDisplayLines
-            return truncated + "\n\n// ··· \(remaining) more lines ···"
         }
 
         // MARK: CONTENT -
@@ -64,7 +45,6 @@ import Litext
         private func triggerAsyncHighlight() {
             highlightTask?.cancel()
             let capturedContent = content
-            let displayContent = Self.truncateIfNeeded(capturedContent)
             let capturedLanguage = language
             let capturedTheme = theme
             highlightTask = Task { [weak self] in
@@ -72,7 +52,7 @@ import Litext
                 guard !Task.isCancelled else { return }
 
                 let map = await CodeHighlighter.current.highlightAsync(
-                    content: displayContent,
+                    content: capturedContent,
                     language: capturedLanguage,
                     theme: capturedTheme
                 )
@@ -80,7 +60,7 @@ import Litext
                       self.content == capturedContent else { return }
                 await MainActor.run {
                     self.highlightMap = map
-                    self.textView.attributedText = map.apply(to: displayContent, with: capturedTheme)
+                    self.textView.attributedText = map.apply(to: capturedContent, with: capturedTheme)
                 }
             }
         }
@@ -164,10 +144,7 @@ import Litext
             let font = theme.fonts.code
             lineNumberView.textColor = theme.colors.body.withAlphaComponent(0.5)
 
-            // Use truncated content's line count (matches what's displayed),
-            // not full content which may have hundreds more lines
-            let displayContent = Self.truncateIfNeeded(content)
-            let lineCount = max(displayContent.components(separatedBy: .newlines).count, 1)
+            let lineCount = max(content.components(separatedBy: .newlines).count, 1)
             let textViewContentHeight = textView.intrinsicContentSize.height
 
             lineNumberView.configure(
