@@ -77,8 +77,8 @@ final class BlockProcessor {
         buildWithParagraphSync { paragraph in
             // Compact spacing for thematic breaks — the line itself provides
             // visual separation, so we don't need large paragraph gaps on top.
-            paragraph.paragraphSpacing = 4
-            paragraph.paragraphSpacingBefore = 4
+            paragraph.paragraphSpacing = 0
+            paragraph.paragraphSpacingBefore = 0
         } content: {
             let drawingCallback = self.thematicBreakDrawing
             return .init(string: LTXReplacementText, attributes: [
