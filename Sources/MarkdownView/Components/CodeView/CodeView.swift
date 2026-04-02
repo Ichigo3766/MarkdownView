@@ -25,7 +25,12 @@ import Litext
             }
         }
 
-        var highlightMap: CodeHighlighter.HighlightMap = .init()
+        var highlightMap: CodeHighlighter.HighlightMap = .init() {
+            didSet {
+                // Re-render the visible window at the current scroll position.
+                applyWindowedText(at: scrollView.contentOffset.y)
+            }
+        }
 
         // MARK: - Auto-Scroll
 
@@ -67,22 +72,210 @@ import Litext
             }
         }
 
+        // MARK: - Pending Scroll Cancellation
+
+        /// Tracks the pending async scrollToBottom work item so we can cancel it
+        /// if the user starts dragging before it fires.
+        private var pendingScrollWorkItem: DispatchWorkItem?
+
+        // MARK: - Virtual Line Windowing State
+
+        /// Pre-split lines for O(1) window computation.
+        private var contentLines: [String] = []
+        /// Character offset of each line's start within `content`. Pre-computed once.
+        private var lineCharOffsets: [Int] = []
+        /// The character offset of the currently-rendered window start.
+        private var currentWindowCharOffset: Int = 0
+        /// The scroll offset at which we last updated the window (hysteresis tracking).
+        private var lastWindowUpdateScrollY: CGFloat = -CGViewConfiguration.windowingHysteresis - 1
+
         // MARK: - Content
 
         var content: String = "" {
             didSet {
                 guard oldValue != content else { return }
-                textView.attributedText = highlightMap.apply(to: content, with: theme)
-                lineNumberView.updateForContent(content)
-                updateLineNumberView()
-                triggerAsyncHighlight()
-                if autoScrollEnabled {
-                    // Defer scroll until after layout pass so contentSize is updated.
-                    DispatchQueue.main.async { [weak self] in
-                        self?.scrollToBottom(animated: false)
+
+                // Detect streaming append: new content is old content + more characters.
+                // This is the common case during streaming — take a fast incremental path.
+                let isStreamingAppend = !oldValue.isEmpty && content.hasPrefix(oldValue)
+
+                if isStreamingAppend {
+                    // FAST PATH: only update changed/new lines, preserve window state.
+                    appendToLineIndex(oldContent: oldValue)
+
+                    // Render at the *current* scroll position so the visible window
+                    // stays in place (typically bottom if auto-scrolling).
+                    let currentScrollY = scrollView.contentOffset.y
+                    applyWindowedText(at: currentScrollY)
+                    // Nudge layout so contentSize reflects the extra lines.
+                    setNeedsLayout()
+
+                    lineNumberView.updateForContent(content)
+                    updateLineNumberView()
+                    triggerAsyncHighlight()
+
+                    if autoScrollEnabled {
+                        // Non-animated scroll during streaming appends.
+                        // Track the work item so we can cancel it if the user
+                        // starts dragging before this fires.
+                        pendingScrollWorkItem?.cancel()
+                        let workItem = DispatchWorkItem { [weak self] in
+                            guard let self, self.autoScrollEnabled else { return }
+                            self.scrollToBottom(animated: false)
+                        }
+                        pendingScrollWorkItem = workItem
+                        DispatchQueue.main.async(execute: workItem)
+                    }
+                } else {
+                    // FULL REBUILD PATH: content was replaced (not just appended).
+                    // Re-compute everything from scratch.
+                    rebuildLineIndex()
+
+                    currentWindowCharOffset = 0
+                    lastWindowUpdateScrollY = -CodeViewConfiguration.windowingHysteresis - 1
+
+                    applyWindowedText(at: 0)
+
+                    lineNumberView.updateForContent(content)
+                    updateLineNumberView()
+                    triggerAsyncHighlight()
+
+                    if autoScrollEnabled {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.scrollToBottom(animated: false)
+                        }
                     }
                 }
             }
+        }
+
+        // MARK: - Line Index Helpers
+
+        private func rebuildLineIndex() {
+            let lines = content.components(separatedBy: .newlines)
+            contentLines = lines
+            var offsets: [Int] = []
+            offsets.reserveCapacity(lines.count)
+            var charOffset = 0
+            for line in lines {
+                offsets.append(charOffset)
+                // +1 for the newline character
+                charOffset += line.utf16.count + 1
+            }
+            lineCharOffsets = offsets
+        }
+
+        /// Incremental line index update for streaming appends.
+        /// Only touches the last (incomplete) line of `oldContent` and any new
+        /// lines that follow it — O(delta) instead of O(n).
+        private func appendToLineIndex(oldContent: String) {
+            guard !contentLines.isEmpty else {
+                // Safety fallback: no existing index — do a full rebuild.
+                rebuildLineIndex()
+                return
+            }
+
+            // The last line in the old index may have grown (partial line being
+            // extended) or new newlines may have been added.
+            let lastOldLineIdx = contentLines.count - 1
+            let lastOldLineCharOffset = lineCharOffsets[lastOldLineIdx]
+
+            // Extract the suffix of content starting at the last old line's offset.
+            let utf16 = content.utf16
+            let suffixStart = utf16.index(utf16.startIndex, offsetBy: min(lastOldLineCharOffset, utf16.count))
+            let suffix = String(utf16[suffixStart...]) ?? String(content[content.index(content.startIndex, offsetBy: min(lastOldLineCharOffset, content.count))...])
+
+            // Split the suffix into lines.
+            let suffixLines = suffix.components(separatedBy: .newlines)
+
+            // Replace the last old line and append any genuinely new ones.
+            contentLines.removeLast()
+            lineCharOffsets.removeLast()
+
+            var charOffset = lastOldLineCharOffset
+            for line in suffixLines {
+                contentLines.append(line)
+                lineCharOffsets.append(charOffset)
+                charOffset += line.utf16.count + 1
+            }
+        }
+
+        /// Returns a slice of `content` covering `lineStart ..< lineEnd` (line indices),
+        /// plus the character offset of that slice's first character.
+        private func contentSlice(lineStart: Int, lineEnd: Int) -> (slice: String, charOffset: Int) {
+            guard !contentLines.isEmpty else { return (content, 0) }
+            let clampedStart = max(0, min(lineStart, contentLines.count - 1))
+            let clampedEnd = max(clampedStart + 1, min(lineEnd, contentLines.count))
+            let charStart = lineCharOffsets[clampedStart]
+            // charEnd: start of first line AFTER our slice, or end of content
+            let charEnd: Int
+            if clampedEnd < contentLines.count {
+                charEnd = lineCharOffsets[clampedEnd]
+            } else {
+                charEnd = content.utf16.count
+            }
+            let startIdx = content.utf16.index(content.utf16.startIndex, offsetBy: min(charStart, content.utf16.count))
+            let endIdx = content.utf16.index(content.utf16.startIndex, offsetBy: min(charEnd, content.utf16.count))
+            let slice = String(content.utf16[startIdx ..< endIdx]) ?? String(content[content.index(content.startIndex, offsetBy: min(charStart, content.count)) ..< content.index(content.startIndex, offsetBy: min(charEnd, content.count))])
+            return (slice, charStart)
+        }
+
+        /// Apply windowed attributed text to `textView` for the given scroll offset.
+        private func applyWindowedText(at scrollOffsetY: CGFloat) {
+            guard !contentLines.isEmpty else {
+                textView.attributedText = highlightMap.apply(to: content, with: theme)
+                return
+            }
+
+            let lineH = CodeViewConfiguration.lineHeight(for: theme)
+            guard lineH > 0 else {
+                textView.attributedText = highlightMap.apply(to: content, with: theme)
+                return
+            }
+
+            // Determine which lines are visible + overscan.
+            let viewportHeight = scrollView.bounds.height > 0 ? scrollView.bounds.height : CodeViewConfiguration.maxCodeViewHeight
+            let overscan = CodeViewConfiguration.overscanLines
+            let visibleTopLine = max(0, Int(scrollOffsetY / lineH) - overscan)
+            let linesVisible = Int(ceil(viewportHeight / lineH)) + overscan * 2
+            let visibleBottomLine = min(contentLines.count, visibleTopLine + linesVisible)
+
+            let (slice, charOffset) = contentSlice(lineStart: visibleTopLine, lineEnd: visibleBottomLine)
+            currentWindowCharOffset = charOffset
+
+            // Apply highlight map to the slice only.
+            let attrText: NSAttributedString
+            if highlightMap.isEmpty {
+                attrText = CodeHighlighter.HighlightMap().apply(toSlice: slice, charOffset: charOffset, with: theme)
+            } else {
+                attrText = highlightMap.apply(toSlice: slice, charOffset: charOffset, with: theme)
+            }
+            textView.attributedText = attrText
+        }
+
+        /// Called from scrollViewDidScroll; only re-windows if scrolled past hysteresis threshold.
+        private func updateWindowIfNeeded(scrollY: CGFloat) {
+            let delta = abs(scrollY - lastWindowUpdateScrollY)
+            guard delta >= CodeViewConfiguration.windowingHysteresis else { return }
+            lastWindowUpdateScrollY = scrollY
+            applyWindowedText(at: scrollY)
+            // Reposition textView to align with the windowed content.
+            repositionTextView()
+        }
+
+        /// Moves `textView.frame.origin.y` so the windowed slice is positioned
+        /// at the correct vertical offset within the scrollView's content area.
+        private func repositionTextView() {
+            guard !contentLines.isEmpty else { return }
+            let charOffset = currentWindowCharOffset
+            // Count how many newlines are before charOffset to get the start line index.
+            let lineH = CodeViewConfiguration.lineHeight(for: theme)
+            // Find line index by searching lineCharOffsets
+            let startLineIndex = lineCharOffsets.lastIndex(where: { $0 <= charOffset }) ?? 0
+            let topY = CGFloat(startLineIndex) * lineH + CodeViewConfiguration.codePadding
+            var frame = textView.frame
+            frame.origin.y = topY
+            textView.frame = frame
         }
 
         // MARK: CONTENT -
@@ -107,8 +300,8 @@ import Litext
                 guard !Task.isCancelled, let self,
                       self.content == capturedContent else { return }
                 await MainActor.run {
+                    // Setting highlightMap triggers a re-render of the current window via didSet.
                     self.highlightMap = map
-                    self.textView.attributedText = map.apply(to: capturedContent, with: capturedTheme)
                 }
             }
         }
@@ -167,22 +360,30 @@ import Litext
         override var intrinsicContentSize: CGSize {
             let labelSize = languageLabel.intrinsicContentSize
             let barHeight = labelSize.height + CodeViewConfiguration.barPadding * 2
-            let textSize = textView.intrinsicContentSize
+            // Use full content height estimate for layout (NOT textView frame height,
+            // which is now only the windowed slice).
+            let fullContentHeight = fullCodeContentHeight()
             let lineNumberWidth = lineNumberView.intrinsicContentSize.width
 
-            let naturalHeight = barHeight + textSize.height + CodeViewConfiguration.codePadding * 2
+            let naturalHeight = barHeight + fullContentHeight + CodeViewConfiguration.codePadding * 2
             // Cap total height to prevent massive CALayer backing stores.
-            // A 400-line code block at 3x Retina would be ~8,800pt = 26,400px
-            // → ~117MB backing store. Capping at 500pt = 1,500px → ~2.5MB.
-            // Content beyond the cap scrolls vertically inside the scrollView.
             let cappedHeight = min(naturalHeight, CodeViewConfiguration.maxCodeViewHeight)
             return CGSize(
                 width: max(
                     labelSize.width + CodeViewConfiguration.barPadding * 2,
-                    lineNumberWidth + textSize.width + CodeViewConfiguration.codePadding * 2
+                    lineNumberWidth + textView.intrinsicContentSize.width + CodeViewConfiguration.codePadding * 2
                 ),
                 height: cappedHeight
             )
+        }
+
+        /// Estimated height of all code content (used for scrollView.contentSize).
+        /// Internal (not private) so the CodeView extension in CodeViewConfiguration.swift can call it.
+        func fullCodeContentHeight() -> CGFloat {
+            guard !contentLines.isEmpty else {
+                return textView.intrinsicContentSize.height
+            }
+            return CGFloat(contentLines.count) * CodeViewConfiguration.lineHeight(for: theme)
         }
 
         @objc func handleCopy(_: UIButton) {
@@ -205,12 +406,12 @@ import Litext
             let font = theme.fonts.code
             lineNumberView.textColor = theme.colors.body.withAlphaComponent(0.5)
 
-            let lineCount = max(content.components(separatedBy: .newlines).count, 1)
-            let textViewContentHeight = textView.intrinsicContentSize.height
+            let lineCount = max(contentLines.isEmpty ? content.components(separatedBy: .newlines).count : contentLines.count, 1)
+            let fullHeight = fullCodeContentHeight()
 
             lineNumberView.configure(
                 lineCount: lineCount,
-                contentHeight: textViewContentHeight,
+                contentHeight: fullHeight,
                 font: font,
                 textColor: .secondaryLabel
             )
@@ -224,25 +425,33 @@ import Litext
         }
     }
 
+    // Private shorthand so we can reference CodeViewConfiguration as CGViewConfiguration
+    // within the windowing methods (avoids line-length issues).
+    private typealias CGViewConfiguration = CodeViewConfiguration
+
     extension CodeView: LTXAttributeStringRepresentable {
         func attributedStringRepresentation() -> NSAttributedString {
-            textView.attributedText
+            // Return the full highlighted content (not just the window) for copy/share.
+            highlightMap.apply(to: content, with: theme)
         }
     }
 
     extension CodeView: UIScrollViewDelegate {
         func scrollViewWillBeginDragging(_: UIScrollView) {
-            // User grabbed the scroll view — disable auto-scroll and show FAB.
+            // Cancel any queued scroll-to-bottom before it can fire,
+            // then disable auto-scroll so new tokens don't re-engage it.
+            pendingScrollWorkItem?.cancel()
+            pendingScrollWorkItem = nil
             autoScrollEnabled = false
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateScrollFABVisibility()
             // Keep the line number view vertically aligned with the scrolled content.
-            // lineNumberView sits outside the scrollView (as a sibling) so we must
-            // manually offset it to match the scrollView's vertical contentOffset.
             let offsetY = scrollView.contentOffset.y
             lineNumberView.contentOffsetY = offsetY
+            // Update the virtual text window (respects hysteresis).
+            updateWindowIfNeeded(scrollY: offsetY)
         }
     }
 

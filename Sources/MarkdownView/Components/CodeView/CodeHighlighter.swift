@@ -137,4 +137,40 @@ public extension CodeHighlighter.HighlightMap {
         }
         return attributedContent
     }
+
+    /// Apply highlights to a **slice** of the full content.
+    /// `charOffset` is the character index in the full string where `slice` begins.
+    /// Only ranges that overlap the slice are applied, shifted by -charOffset.
+    func apply(toSlice slice: String, charOffset: Int, with theme: MarkdownTheme) -> NSMutableAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = CodeViewConfiguration.codeLineSpacing
+
+        let plainTextColor = theme.colors.code
+        let attributedContent: NSMutableAttributedString = .init(
+            string: slice,
+            attributes: [
+                .font: theme.fonts.code,
+                .paragraphStyle: paragraphStyle,
+                .foregroundColor: plainTextColor,
+            ]
+        )
+
+        let sliceLength = attributedContent.length
+        let sliceEnd = charOffset + sliceLength
+
+        for (range, color) in self {
+            // Skip ranges entirely outside the slice
+            guard range.upperBound > charOffset, range.location < sliceEnd else { continue }
+            guard color != plainTextColor else { continue }
+
+            // Clamp to the slice boundaries (use Swift.max/min to avoid Sequence method ambiguity)
+            let clampedStart = Swift.max(range.location, charOffset)
+            let clampedEnd = Swift.min(range.upperBound, sliceEnd)
+            let localRange = NSRange(location: clampedStart - charOffset, length: clampedEnd - clampedStart)
+            guard localRange.length > 0, localRange.location >= 0, localRange.upperBound <= sliceLength else { continue }
+
+            attributedContent.addAttributes([.foregroundColor: color], range: localRange)
+        }
+        return attributedContent
+    }
 }

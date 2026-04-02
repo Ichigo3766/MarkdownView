@@ -24,6 +24,26 @@ enum CodeViewConfiguration {
     /// Content beyond this height scrolls vertically inside the CodeView.
     static let maxCodeViewHeight: CGFloat = 500
 
+    // MARK: - Virtual Line Windowing
+
+    /// Extra lines rendered above and below the visible viewport.
+    /// Prevents blank flashes during fast scrolling.
+    static let overscanLines: Int = 20
+
+    /// Minimum scroll distance (in points) before re-computing the visible
+    /// line window. Avoids thrashing on small scroll increments.
+    static let windowingHysteresis: CGFloat = 40
+
+    /// Returns the height of a single code line (font line-height + spacing).
+    static func lineHeight(for theme: MarkdownTheme) -> CGFloat {
+        let font = theme.fonts.code
+        #if canImport(UIKit)
+            return font.lineHeight + codeLineSpacing
+        #elseif canImport(AppKit)
+            return (font.ascender + abs(font.descender) + font.leading) + codeLineSpacing
+        #endif
+    }
+
     static func intrinsicHeight(
         for content: String,
         theme: MarkdownTheme = .default
@@ -186,16 +206,27 @@ enum CodeViewConfiguration {
                 height: bounds.height - barHeight
             )
 
-            textView.frame = CGRect(
-                x: CodeViewConfiguration.codePadding,
-                y: CodeViewConfiguration.codePadding,
-                width: max(scrollView.bounds.width - CodeViewConfiguration.codePadding * 2, textContentSize.width),
-                height: textContentSize.height
+            // The full logical content height drives the scrollView's content size
+            // (scroll physics, indicator length, etc.) but NOT the textView frame.
+            let fullHeight = fullCodeContentHeight()
+            let contentWidth = max(
+                scrollView.bounds.width - CodeViewConfiguration.codePadding * 2,
+                textContentSize.width
             )
 
             scrollView.contentSize = CGSize(
-                width: textView.frame.width + CodeViewConfiguration.codePadding * 2,
-                height: textView.frame.height + CodeViewConfiguration.codePadding * 2
+                width: contentWidth + CodeViewConfiguration.codePadding * 2,
+                height: fullHeight + CodeViewConfiguration.codePadding * 2
+            )
+
+            // textView is sized to its current windowed slice height — NOT the full content.
+            // repositionTextView() moves its origin.y to match the current scroll position.
+            // This keeps the CALayer backing store proportional to the viewport only.
+            textView.frame = CGRect(
+                x: CodeViewConfiguration.codePadding,
+                y: textView.frame.origin.y,   // preserved from repositionTextView()
+                width: contentWidth,
+                height: textContentSize.height // windowed slice height, not fullHeight
             )
         }
     }

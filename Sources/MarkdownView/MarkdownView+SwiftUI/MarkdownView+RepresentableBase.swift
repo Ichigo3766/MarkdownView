@@ -11,6 +11,8 @@ import SwiftUI
 protocol MarkdownViewRepresentableBase {
     var contentSource: MarkdownView.ContentSource { get }
     var theme: MarkdownTheme { get }
+    /// When true, this view is inside an actively-streaming message.
+    /// Used to select the throttled update path and stabilize height.
     var codeBlockAutoScroll: Bool { get }
     var width: CGFloat { get }
     var heightBinding: Binding<CGFloat> { get }
@@ -55,6 +57,8 @@ extension MarkdownViewRepresentableBase {
         let needsUpdate: Bool
         let content: MarkdownTextView.PreprocessedContent
 
+        let isStreaming = codeBlockAutoScroll
+
         switch contentSource {
         case let .text(text):
             needsUpdate = coordinator.lastText != text
@@ -86,16 +90,18 @@ extension MarkdownViewRepresentableBase {
             coordinator.lastTheme = theme
         }
         #if canImport(UIKit)
-        view.setCodeBlockAutoScroll(codeBlockAutoScroll)
+        view.setCodeBlockAutoScroll(isStreaming)
         #endif
-        updateMeasuredHeight(for: view)
+        updateMeasuredHeight(for: view, isStreaming: isStreaming)
     }
 
-    func updateMeasuredHeight(for view: MarkdownTextView) {
+    func updateMeasuredHeight(for view: MarkdownTextView, isStreaming: Bool = false) {
         guard width.isFinite, width > 0 else { return }
         let size = view.boundingSize(for: width)
         let height = ceil(size.height)
-        guard abs(height - heightBinding.wrappedValue) > 0.5 else { return }
+        let current = heightBinding.wrappedValue
+
+        guard abs(height - current) > 0.5 else { return }
         DispatchQueue.main.async {
             self.heightBinding.wrappedValue = height
         }
