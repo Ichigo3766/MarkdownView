@@ -28,7 +28,7 @@ public extension MarkdownTextView {
             blocks = parserResult.document
             rendered = parserResult.render(theme: theme)
             // Always empty — highlighting is now lazy and async.
-            // Each CodeView triggers its own async highlight via HighlightSwift
+            // Each CodeView triggers its own async highlight via HighlighterSwift
             // when it becomes visible. This eliminates the O(n²) sync blocking
             // that caused 3GB+ memory and lag during streaming.
             highlightMaps = [:]

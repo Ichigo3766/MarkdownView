@@ -20,7 +20,7 @@ let package = Package(
         .package(url: "https://github.com/Lakr233/Litext", from: "0.5.6"),
         .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.7.3"),
         .package(url: "https://github.com/apple/swift-collections", from: "1.3.0"),
-        .package(url: "https://github.com/appstefan/HighlightSwift", from: "1.1.0"),
+        .package(url: "https://github.com/smittytone/HighlighterSwift", from: "3.0.0"),
         .package(url: "https://github.com/swiftlang/swift-cmark", from: "0.7.1"),
         .package(url: "https://github.com/nicklockwood/LRUCache", from: "1.0.7"),
     ],
@@ -29,7 +29,7 @@ let package = Package(
             name: "MarkdownView",
             dependencies: [
                 "Litext",
-                "HighlightSwift",
+                .product(name: "Highlighter", package: "HighlighterSwift"),
                 "MarkdownParser",
                 "SwiftMath",
                 "LRUCache",

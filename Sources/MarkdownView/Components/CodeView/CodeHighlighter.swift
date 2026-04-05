@@ -4,36 +4,73 @@
 //
 
 import Foundation
-import HighlightSwift
+import Highlighter
 import LRUCache
 
 #if canImport(UIKit)
     import UIKit
-
     public typealias PlatformColor = UIColor
 #elseif canImport(AppKit)
     import AppKit
-
     public typealias PlatformColor = NSColor
 #endif
 
 public final class CodeHighlighter: @unchecked Sendable {
     public typealias HighlightMap = [NSRange: PlatformColor]
 
-    public private(set) var renderCache = LRUCache<Int, HighlightMap>(countLimit: 256)
-    private let highlight = Highlight()
+    // LRU cache: 256 entries per appearance variant.
+    // Key encodes both content + language + dark/light so the two variants
+    // don't collide.
+    public private(set) var renderCache = LRUCache<Int, HighlightMap>(countLimit: 512)
 
-    private init() {}
+    // HighlighterSwift wraps a JSContext internally. JSContext is NOT thread-safe,
+    // so all highlight() calls must be serialised onto this dedicated queue.
+    private let highlightQueue = DispatchQueue(
+        label: "com.markdownview.codehighlighter",
+        qos: .userInitiated
+    )
+
+    // Two Highlighter instances — one per appearance.
+    // "atom-one-light" → light mode
+    // "atom-one-dark"  → dark mode
+    private let lightHighlighter: Highlighter?
+    private let darkHighlighter: Highlighter?
+
+    private init() {
+        let light = Highlighter()
+        light?.ignoreIllegals = true
+        light?.setTheme("atom-one-light")
+        self.lightHighlighter = light
+
+        let dark = Highlighter()
+        dark?.ignoreIllegals = true
+        dark?.setTheme("atom-one-dark")
+        self.darkHighlighter = dark
+    }
 
     public static let current = CodeHighlighter()
 
+    /// Call once from app launch to eagerly front-load the ~50-100 ms JSContext
+    /// initialisation cost so the first code block doesn't pay it.
+    public static func warmUp() {
+        _ = CodeHighlighter.current
+    }
+
     // MARK: - Key Generation
 
-    public func key(for content: String, language: String?) -> Int {
+    /// `isDark` is folded into the hash so light and dark cached results don't collide.
+    public func key(for content: String, language: String?, isDark: Bool) -> Int {
         var hasher = Hasher()
         hasher.combine(content)
         hasher.combine(language?.lowercased() ?? "")
+        hasher.combine(isDark)
         return hasher.finalize()
+    }
+
+    /// Convenience overload — reads current appearance automatically.
+    /// Used by callers that don't have an explicit `isDark` value.
+    public func key(for content: String, language: String?) -> Int {
+        key(for: content, language: language, isDark: currentAppearanceIsDark())
     }
 
     // MARK: - Synchronous (cache-only, used during rendering)
@@ -46,8 +83,9 @@ public final class CodeHighlighter: @unchecked Sendable {
         language: String?,
         theme: MarkdownTheme = .default
     ) -> HighlightMap {
-        let key = key ?? self.key(for: content, language: language)
-        if let cached = renderCache.value(forKey: key) {
+        let isDark = currentAppearanceIsDark()
+        let k = key ?? self.key(for: content, language: language, isDark: isDark)
+        if let cached = renderCache.value(forKey: k) {
             return cached
         }
         return [:]
@@ -62,43 +100,91 @@ public final class CodeHighlighter: @unchecked Sendable {
         language: String?,
         theme: MarkdownTheme = .default
     ) async -> HighlightMap {
-        let cacheKey = key(for: content, language: language)
+        // Capture appearance on the calling (main) thread before hopping queues.
+        let isDark = currentAppearanceIsDark()
+        let cacheKey = key(for: content, language: language, isDark: isDark)
 
-        // Check cache first
+        // Check cache first — fast path, no JSContext overhead.
         if let cached = renderCache.value(forKey: cacheKey) {
             return cached
         }
 
-        do {
-            let lang = language?.lowercased() ?? ""
-            let attributedText: AttributedString
+        // Performance gate: don't waste JSContext overhead on trivially short snippets.
+        guard content.count > 20 else { return [:] }
 
-            // Use dark-mode-aware colors — HighlightSwift auto-switches
-            let colors: HighlightColors = .dark(.github)
+        // Performance cap: clamp very large blocks to avoid JSContext hangs.
+        let maxHighlightLength = 50_000
+        let highlightContent = content.count > maxHighlightLength
+            ? String(content.prefix(maxHighlightLength))
+            : content
 
-            if lang.isEmpty || lang == "plaintext" {
-                // Auto-detect language
-                attributedText = try await highlight.attributedText(content, colors: colors)
-            } else {
-                // Use language string directly — HighlightSwift accepts
-                // language aliases like "swift", "python", "javascript", etc.
-                attributedText = try await highlight.attributedText(content, language: lang, colors: colors)
+        let lang = language?.lowercased() ?? ""
+
+        // All JSContext calls must be serialised onto highlightQueue.
+        let map: HighlightMap = await withCheckedContinuation { continuation in
+            highlightQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: [:])
+                    return
+                }
+
+                let highlighter = isDark ? self.darkHighlighter : self.lightHighlighter
+                guard let highlighter else {
+                    continuation.resume(returning: [:])
+                    return
+                }
+
+                let nsAttrStr: NSAttributedString?
+
+                if lang.isEmpty || lang == "plaintext" {
+                    // Auto-detection is significantly more expensive than explicit highlighting.
+                    // Skip it for large blocks.
+                    if highlightContent.count > 5_000 {
+                        continuation.resume(returning: [:])
+                        return
+                    }
+                    nsAttrStr = highlighter.highlight(highlightContent)
+                } else {
+                    nsAttrStr = highlighter.highlight(highlightContent, as: lang)
+                }
+
+                guard let result = nsAttrStr else {
+                    continuation.resume(returning: [:])
+                    return
+                }
+
+                let resultMap = self.extractColorMap(from: result)
+                continuation.resume(returning: resultMap)
             }
-
-            // Convert AttributedString → [NSRange: PlatformColor]
-            let map = extractColorMap(from: attributedText)
-            renderCache.setValue(map, forKey: cacheKey)
-            return map
-        } catch {
-            return [:]
         }
+
+        // Only cache non-empty results.
+        if !map.isEmpty {
+            renderCache.setValue(map, forKey: cacheKey)
+        }
+        return map
     }
 
-    // MARK: - AttributedString → HighlightMap Conversion
+    // MARK: - Appearance Helper
 
-    private func extractColorMap(from attributedText: AttributedString) -> HighlightMap {
+    /// Returns true if the current system appearance is dark.
+    /// Must be called from the main thread (or at least before hopping off it).
+    private func currentAppearanceIsDark() -> Bool {
+        #if canImport(UIKit)
+            // UITraitCollection.current is safe to read on any thread when called
+            // from a SwiftUI/UIKit update context. We capture it before the queue hop.
+            return UITraitCollection.current.userInterfaceStyle == .dark
+        #elseif canImport(AppKit)
+            return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        #else
+            return false
+        #endif
+    }
+
+    // MARK: - NSAttributedString → HighlightMap Conversion
+
+    private func extractColorMap(from nsAttrStr: NSAttributedString) -> HighlightMap {
         var map: HighlightMap = [:]
-        let nsAttrStr = NSAttributedString(attributedText)
 
         nsAttrStr.enumerateAttribute(
             .foregroundColor,
