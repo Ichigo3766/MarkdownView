@@ -99,6 +99,17 @@ final class TextBuilder {
         text.fixAttributes(in: .init(location: 0, length: text.length))
         return .init(document: text, subviews: subviewCollector)
     }
+
+    /// Builds a single block node into an attributed string segment.
+    /// Used by the incremental render path to re-render only changed blocks.
+    func buildBlock(_ node: MarkdownBlockNode) -> BuildResult {
+        assert(!previouslyBuilt, "TextBuilder can only be built once.")
+        previouslyBuilt = true
+        var subviewCollector = [PlatformView]()
+        text.append(processBlock(node, context: context, subviews: &subviewCollector))
+        text.fixAttributes(in: .init(location: 0, length: text.length))
+        return .init(document: text, subviews: subviewCollector)
+    }
 }
 
 // MARK: - Block Processing

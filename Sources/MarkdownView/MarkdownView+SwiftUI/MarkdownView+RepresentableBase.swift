@@ -88,15 +88,34 @@ extension MarkdownViewRepresentableBase {
             view.setMarkdownManually(content)
             view.invalidateIntrinsicContentSize()
             coordinator.lastTheme = theme
+            // Content just changed — reset the height throttle timestamp so the
+            // very first measurement after a content change is never skipped.
+            coordinator.lastHeightMeasureTime = 0
         }
         #if canImport(UIKit)
         view.setCodeBlockAutoScroll(isStreaming)
         #endif
-        updateMeasuredHeight(for: view, isStreaming: isStreaming)
+        updateMeasuredHeight(for: view, coordinator: coordinator, isStreaming: isStreaming)
     }
 
-    func updateMeasuredHeight(for view: MarkdownTextView, isStreaming: Bool = false) {
+    func updateMeasuredHeight(
+        for view: MarkdownTextView,
+        coordinator: MarkdownViewCoordinator,
+        isStreaming: Bool = false
+    ) {
         guard width.isFinite, width > 0 else { return }
+
+        // During streaming, calling `boundingSize(for:)` on every token causes
+        // a full O(n) CoreText layout pass on the entire growing attributed string.
+        // Throttle to at most once per `heightThrottleInterval` seconds while
+        // streaming; always measure immediately when streaming ends or content changes.
+        if isStreaming {
+            let now = CFAbsoluteTimeGetCurrent()
+            let elapsed = now - coordinator.lastHeightMeasureTime
+            guard elapsed >= MarkdownViewCoordinator.heightThrottleInterval else { return }
+            coordinator.lastHeightMeasureTime = now
+        }
+
         let size = view.boundingSize(for: width)
         let height = ceil(size.height)
         let current = heightBinding.wrappedValue

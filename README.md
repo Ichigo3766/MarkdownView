@@ -31,6 +31,15 @@ A powerful pure UIKit framework for rendering Markdown documents with real-time 
 ### 🔧 Code Block Height Fix
 - Code blocks use actual `intrinsicContentSize` instead of a formula-based height calculation — fixes extra bottom whitespace
 
+### ⚡ Streaming Performance — Block-Level Incremental Rendering
+Major rendering pipeline overhaul to keep 120Hz ProMotion smooth during long AI streaming sessions:
+
+- **Block-level render cache** (`CachedBlockSegment`): Each `MarkdownBlockNode` is rendered once and cached. On every streaming update, only the blocks that actually changed are re-rendered — unchanged blocks (the entire clean prefix of the document) are reused at zero cost.
+- **Persistent `NSMutableAttributedString` mutation**: Instead of rebuilding the full concatenated attributed string on every token (O(n_total)), the dirty tail is deleted and replaced in-place (O(n_dirty)). CoreText only re-lays out the portion that changed.
+- **Deferred layout**: Removed the synchronous `layoutIfNeeded()` call after every streaming update. `setNeedsLayout()` is used instead, letting the run loop coalesce and batch layout passes — prevents main-thread stalls on large documents.
+- **Throttled height measurement**: `boundingSize(for:)` / `intrinsicContentSize` (a full O(n) CoreText layout pass) is throttled to at most once per 150ms during streaming. Immediately measured when streaming ends or content changes.
+- **`buildSingleBlock`**: New `TextBuilder.buildSingleBlock(node:view:viewProvider:)` method that renders a single `MarkdownBlockNode` in isolation, enabling the incremental path without a full document rebuild.
+
 ## Preview
 
 ![Preview](./Resources/Simulator%20Screenshot%20-%20iPad%20mini%20(A17%20Pro)%20-%202025-05-27%20at%2003.03.27.png)

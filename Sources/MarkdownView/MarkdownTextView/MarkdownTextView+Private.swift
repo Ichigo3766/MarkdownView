@@ -31,6 +31,14 @@ extension MarkdownTextView {
 
     func use(_ content: PreprocessedContent) {
         assert(Thread.isMainThread)
+
+        // When content is empty (reset case), clear the block-level cache AND the
+        // persistent attributed string so the next real document starts clean.
+        if content.blocks.isEmpty {
+            cachedBlockSegments.removeAll()
+            cachedAttributedString = .init()
+        }
+
         document = content
         // due to a bug in model gemini-flash
         // there might be a large of unknown empty whitespace inside the table
@@ -44,12 +52,16 @@ extension MarkdownTextView {
         // For a message with code blocks + math, this saves ~2-10MB per message.
         // The coordinator's lastText/lastPreprocessedContent handles diffing,
         // so clearing `document` here is safe.
+        // NOTE: We do NOT clear cachedBlockSegments here — the cache holds its
+        // own copies of MarkdownBlockNode and NSAttributedString, and must persist
+        // across streaming updates to enable incremental rendering.
         document = PreprocessedContent()
 
-        #if canImport(UIKit)
-            layoutIfNeeded()
-        #elseif canImport(AppKit)
-            layoutSubtreeIfNeeded()
-        #endif
+        // Do NOT call layoutIfNeeded() here.
+        // updateTextExecute() already called setNeedsLayout() / needsLayout = true,
+        // which schedules layout for the next run-loop pass. Calling layoutIfNeeded()
+        // synchronously would force a full O(n) layout of the entire growing attributed
+        // string on EVERY streaming token — the main cause of the smoothness drop.
+        // The run-loop will batch and coalesce layout passes automatically.
     }
 }

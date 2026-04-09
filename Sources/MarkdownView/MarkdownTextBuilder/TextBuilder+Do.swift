@@ -8,6 +8,7 @@
 import CoreText
 import Foundation
 import Litext
+import MarkdownParser
 
 #if canImport(UIKit)
     import UIKit
@@ -48,6 +49,169 @@ import Litext
 #endif
 
 extension TextBuilder {
+    /// Builds a single block node with all the drawing callbacks wired up.
+    /// Used by the incremental render path in MarkdownTextView to skip re-rendering
+    /// unchanged blocks — only the newly changed/added block(s) go through this.
+    static func buildSingleBlock(
+        node: MarkdownBlockNode,
+        view: MarkdownTextView,
+        viewProvider: ReusableViewProvider
+    ) -> BuildResult {
+        let context: MarkdownTextView.PreprocessedContent = view.document
+        let theme: MarkdownTheme = view.theme
+
+        var blockquoteMarkingStorage: CGFloat? = nil
+
+        @discardableResult
+        func populateContextColorFromFirstRun(context: CGContext, line: CTLine) -> PlatformColor {
+            var textColor = theme.colors.body
+            if let firstRun = line.glyphRuns().first,
+               let attributes = CTRunGetAttributes(firstRun) as? [NSAttributedString.Key: Any],
+               let color = attributes[.foregroundColor] as? PlatformColor
+            {
+                textColor = color
+            }
+            context.setStrokeColor(textColor.cgColor)
+            context.setFillColor(textColor.cgColor)
+            return textColor
+        }
+
+        return TextBuilder(nodes: [node], context: context, viewProvider: viewProvider)
+            .withTheme(theme)
+            .withBulletDrawing { context, line, lineOrigin, depth in
+                let radius: CGFloat = 3
+                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                populateContextColorFromFirstRun(context: context, line: line)
+                let rect = CGRect(
+                    x: boundingBox.minX - 16,
+                    y: boundingBox.midY - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                )
+                if depth == 0 {
+                    context.fillEllipse(in: rect)
+                } else if depth == 1 {
+                    context.strokeEllipse(in: rect)
+                } else {
+                    context.fill(rect)
+                }
+            }
+            .withNumberedDrawing { context, line, lineOrigin, num in
+                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                let textColor = populateContextColorFromFirstRun(context: context, line: line)
+                let numText = "\(num)."
+                let font = theme.fonts.body
+                let attrs: [CFString: Any] = [
+                    kCTFontAttributeName: font,
+                    kCTForegroundColorAttributeName: textColor.cgColor,
+                ]
+                let attrStr = CFAttributedStringCreate(nil, numText as CFString, attrs as CFDictionary)!
+                let ctLine = CTLineCreateWithAttributedString(attrStr)
+                let x: CGFloat = 4
+                context.textPosition = CGPoint(x: x, y: lineOrigin.y)
+                CTLineDraw(ctLine, context)
+            }
+            .withCheckboxDrawing { context, line, lineOrigin, isChecked in
+                let rect = lineBoundingBox(line, lineOrigin: lineOrigin)
+                    .offsetBy(dx: -16, dy: 0)
+                    .offsetBy(dx: -8, dy: 0)
+                let image = if isChecked { kCheckedBoxImage } else { kUncheckedBoxImage }
+                #if canImport(UIKit)
+                    guard let cgImage = image.cgImage else { return }
+                #elseif canImport(AppKit)
+                    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+                #endif
+                let imageSize = image.size
+                let targetRect: CGRect = .init(
+                    x: rect.minX,
+                    y: rect.midY - imageSize.height / 2,
+                    width: imageSize.width,
+                    height: imageSize.height
+                )
+                let textColor = populateContextColorFromFirstRun(context: context, line: line)
+                context.clip(to: targetRect, mask: cgImage)
+                context.setFillColor(textColor.withAlphaComponent(0.24).cgColor)
+                context.fill(targetRect)
+            }
+            .withThematicBreakDrawing { [weak view] context, line, lineOrigin in
+                guard let view else { return }
+                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                context.setLineWidth(1)
+                #if canImport(UIKit)
+                    context.setStrokeColor(UIColor.label.withAlphaComponent(0.1).cgColor)
+                #elseif canImport(AppKit)
+                    context.setStrokeColor(NSColor.labelColor.withAlphaComponent(0.1).cgColor)
+                #endif
+                context.move(to: .init(x: boundingBox.minX, y: boundingBox.midY))
+                context.addLine(to: .init(x: boundingBox.minX + view.bounds.width, y: boundingBox.midY))
+                context.strokePath()
+            }
+            .withCodeDrawing { [weak view] _, line, lineOrigin in
+                guard let view else { return }
+                guard let firstRun = line.glyphRuns().first else { return }
+                let attributes = firstRun.attributes
+                guard let codeView = attributes[.contextView] as? CodeView else {
+                    assertionFailure()
+                    return
+                }
+                if codeView.superview != view { view.addSubview(codeView) }
+                let intrinsicContentSize = codeView.intrinsicContentSize
+                let lineBoundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                var leftIndent: CGFloat = 0
+                if let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle {
+                    leftIndent = paragraphStyle.headIndent
+                }
+                codeView.frame = .init(
+                    origin: .init(x: lineOrigin.x + leftIndent, y: view.bounds.height - lineBoundingBox.maxY),
+                    size: .init(width: view.bounds.width - leftIndent, height: intrinsicContentSize.height)
+                )
+                codeView.previewAction = view.codePreviewHandler
+            }
+            .withTableDrawing { [weak view] _, line, lineOrigin in
+                guard let view else { return }
+                guard let firstRun = line.glyphRuns().first else { return }
+                let attributes = firstRun.attributes
+                guard let tableView = attributes[.contextView] as? TableView else {
+                    assertionFailure()
+                    return
+                }
+                if tableView.superview != view { view.addSubview(tableView) }
+                tableView.linkHandler = view.linkHandler
+                let lineBoundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                let intrinsicContentSize = tableView.intrinsicContentSize
+                var leftIndent: CGFloat = 0
+                if let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle {
+                    leftIndent = paragraphStyle.headIndent
+                }
+                tableView.frame = .init(
+                    x: lineOrigin.x + leftIndent,
+                    y: view.bounds.height - lineBoundingBox.maxY,
+                    width: view.bounds.width - leftIndent,
+                    height: intrinsicContentSize.height
+                )
+            }
+            .withBlockquoteMarking { _, line, lineOrigin in
+                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                blockquoteMarkingStorage = boundingBox.maxY
+            }
+            .withBlockquoteDrawing { context, line, lineOrigin in
+                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                defer { blockquoteMarkingStorage = nil }
+                let quotingLineHeight: CGFloat = blockquoteMarkingStorage! - boundingBox.minY
+                let lineRect = CGRect(
+                    x: 0,
+                    y: blockquoteMarkingStorage! - quotingLineHeight,
+                    width: 4,
+                    height: quotingLineHeight
+                )
+                context.setFillColor(theme.colors.body.withAlphaComponent(0.1).cgColor)
+                let roundedPath = CGPath(roundedRect: lineRect, cornerWidth: 2, cornerHeight: 2, transform: nil)
+                context.addPath(roundedPath)
+                context.fillPath()
+            }
+            .buildBlock(node)
+    }
+
     @inline(__always)
     static func lineBoundingBox(_ line: CTLine, lineOrigin: CGPoint) -> CGRect {
         var ascent: CGFloat = 0

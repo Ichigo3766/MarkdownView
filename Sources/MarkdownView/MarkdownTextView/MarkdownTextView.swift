@@ -20,11 +20,27 @@ import MarkdownParser
         public var theme: MarkdownTheme = .default {
             didSet {
                 textView.selectionBackgroundColor = theme.colors.selectionBackground
+                // Theme change invalidates all cached block renders since fonts/colors differ.
+                cachedBlockSegments.removeAll()
                 setMarkdown(document)
             }
         }
 
         public internal(set) weak var trackedScrollView: UIScrollView? // for selection updating
+
+        // Block-level render cache: stores rendered output per MarkdownBlockNode so
+        // unchanged blocks can be reused on the next streaming update without re-rendering.
+        struct CachedBlockSegment {
+            let node: MarkdownBlockNode
+            let attributedString: NSAttributedString
+            let subviews: [UIView]
+        }
+        var cachedBlockSegments: [CachedBlockSegment] = []
+
+        // Persistent mutable attributed string for the entire document.
+        // We mutate only the dirty tail in-place instead of rebuilding from scratch
+        // on every streaming update — converts O(n_total) concat to O(n_dirty).
+        var cachedAttributedString: NSMutableAttributedString = .init()
 
         var contextViews: [UIView] = []
         var cancellables = Set<AnyCancellable>()
@@ -115,11 +131,27 @@ import MarkdownParser
         public var theme: MarkdownTheme = .default {
             didSet {
                 textView.selectionBackgroundColor = theme.colors.selectionBackground
+                // Theme change invalidates all cached block renders since fonts/colors differ.
+                cachedBlockSegments.removeAll()
                 setMarkdown(document)
             }
         }
 
         public internal(set) weak var trackedScrollView: NSScrollView? // for selection updating
+
+        // Block-level render cache: stores rendered output per MarkdownBlockNode so
+        // unchanged blocks can be reused on the next streaming update without re-rendering.
+        struct CachedBlockSegment {
+            let node: MarkdownBlockNode
+            let attributedString: NSAttributedString
+            let subviews: [NSView]
+        }
+        var cachedBlockSegments: [CachedBlockSegment] = []
+
+        // Persistent mutable attributed string for the entire document.
+        // We mutate only the dirty tail in-place instead of rebuilding from scratch
+        // on every streaming update — converts O(n_total) concat to O(n_dirty).
+        var cachedAttributedString: NSMutableAttributedString = .init()
 
         var contextViews: [NSView] = []
         var cancellables = Set<AnyCancellable>()
