@@ -78,6 +78,10 @@ import Litext
         /// if the user starts dragging before it fires.
         private var pendingScrollWorkItem: DispatchWorkItem?
 
+        /// Set by the streaming append path; consumed once in layoutSubviews so we
+        /// only perform one scrollToBottom per layout pass instead of once per token.
+        private var needsScrollToBottomOnLayout: Bool = false
+
         // MARK: - Virtual Line Windowing State
 
         /// Pre-split lines for O(1) window computation.
@@ -112,19 +116,27 @@ import Litext
 
                     lineNumberView.updateForContent(content)
                     updateLineNumberView()
-                    triggerAsyncHighlight()
 
+                    // During streaming we suppress highlighting to avoid flicker.
+                    // Clear any stale highlight map so the code renders cleanly
+                    // (without leftover colouring from a previous partial highlight).
+                    // The triggerAsyncHighlight() call in the full-rebuild path will
+                    // fire once streaming is complete and produce the final colouring.
+                    if !highlightMap.isEmpty {
+                        // Setting highlightMap triggers one applyWindowedText via didSet —
+                        // that's acceptable (replaces stale colours with plain text).
+                        highlightMap = .init()
+                    } else {
+                        // Map already clear; just cancel any in-flight highlight task.
+                        highlightTask?.cancel()
+                    }
+
+                    // Coalesce scroll-to-bottom to once per layout pass.
+                    // This prevents per-token DispatchWorkItems piling up and
+                    // blocking gesture recognisers from firing during streaming.
                     if autoScrollEnabled {
-                        // Non-animated scroll during streaming appends.
-                        // Track the work item so we can cancel it if the user
-                        // starts dragging before this fires.
-                        pendingScrollWorkItem?.cancel()
-                        let workItem = DispatchWorkItem { [weak self] in
-                            guard let self, self.autoScrollEnabled else { return }
-                            self.scrollToBottom(animated: false)
-                        }
-                        pendingScrollWorkItem = workItem
-                        DispatchQueue.main.async(execute: workItem)
+                        needsScrollToBottomOnLayout = true
+                        setNeedsLayout()
                     }
                 } else {
                     // FULL REBUILD PATH: content was replaced (not just appended).
@@ -355,6 +367,13 @@ import Litext
             )
             bringSubviewToFront(scrollFAB)
             updateScrollFABVisibility()
+            // Consume the deferred scroll-to-bottom flag set during streaming.
+            // Doing it here (after contentSize is up-to-date) guarantees we scroll
+            // to the real bottom, and only once per layout pass.
+            if needsScrollToBottomOnLayout && autoScrollEnabled {
+                needsScrollToBottomOnLayout = false
+                scrollToBottom(animated: false)
+            }
         }
 
         override var intrinsicContentSize: CGSize {
