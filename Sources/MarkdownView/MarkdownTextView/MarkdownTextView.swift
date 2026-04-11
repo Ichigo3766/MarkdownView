@@ -113,7 +113,7 @@ import MarkdownParser
         public func setCodeBlockAutoScroll(_ enabled: Bool) {
             for view in contextViews {
                 if let codeView = view as? CodeView {
-                    codeView.autoScrollEnabled = enabled
+                    codeView.isStreaming = enabled
                 }
             }
         }

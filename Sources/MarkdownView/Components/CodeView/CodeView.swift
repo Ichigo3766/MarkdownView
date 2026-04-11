@@ -32,13 +32,42 @@ import Litext
             }
         }
 
-        // MARK: - Auto-Scroll
+        // MARK: - Streaming / Auto-Scroll State
+
+        /// True while the parent MarkdownView is actively streaming content.
+        /// Setting this to `true` enables auto-scroll (unless the user has scrolled
+        /// away). Setting it to `false` disables auto-scroll and hides the FAB.
+        var isStreaming: Bool = false {
+            didSet {
+                guard isStreaming != oldValue else { return }
+                if isStreaming {
+                    // Starting a new stream — enable auto-scroll and reset the
+                    // user-override flag so the block starts scrolling from top.
+                    userScrolledAway = false
+                    autoScrollEnabled = true
+                    // Trigger an immediate scroll to bottom so we don't stay stuck.
+                    needsScrollToBottomOnLayout = true
+                    setNeedsLayout()
+                } else {
+                    // Stream ended — disable auto-scroll.
+                    autoScrollEnabled = false
+                    userScrolledAway = false
+                }
+            }
+        }
+
+        /// True once the user has dragged the scroll view upward, breaking out of
+        /// auto-scroll. Reset to false when streaming starts, or when the user
+        /// scrolls back to the bottom (or taps the FAB).
+        private var userScrolledAway: Bool = false
 
         /// When true, the code block scrolls to the bottom whenever new content arrives.
-        /// Set to false when the user manually scrolls up; the FAB re-enables it.
-        var autoScrollEnabled: Bool = false {
+        /// Managed internally; controlled via `isStreaming` and user scroll gestures.
+        private(set) var autoScrollEnabled: Bool = false {
             didSet { updateScrollFABVisibility() }
         }
+
+        // MARK: - FAB
 
         private lazy var scrollFAB: UIButton = {
             let btn = UIButton(type: .system)
@@ -55,6 +84,7 @@ import Litext
         }()
 
         @objc private func scrollFABTapped() {
+            userScrolledAway = false
             autoScrollEnabled = true
             scrollToBottom(animated: true)
         }
@@ -134,7 +164,7 @@ import Litext
                     // Coalesce scroll-to-bottom to once per layout pass.
                     // This prevents per-token DispatchWorkItems piling up and
                     // blocking gesture recognisers from firing during streaming.
-                    if autoScrollEnabled {
+                    if autoScrollEnabled && !userScrolledAway {
                         needsScrollToBottomOnLayout = true
                         setNeedsLayout()
                     }
@@ -152,7 +182,7 @@ import Litext
                     updateLineNumberView()
                     triggerAsyncHighlight()
 
-                    if autoScrollEnabled {
+                    if autoScrollEnabled && !userScrolledAway {
                         DispatchQueue.main.async { [weak self] in
                             self?.scrollToBottom(animated: false)
                         }
@@ -370,9 +400,11 @@ import Litext
             // Consume the deferred scroll-to-bottom flag set during streaming.
             // Doing it here (after contentSize is up-to-date) guarantees we scroll
             // to the real bottom, and only once per layout pass.
-            if needsScrollToBottomOnLayout && autoScrollEnabled {
+            if needsScrollToBottomOnLayout && autoScrollEnabled && !userScrolledAway {
                 needsScrollToBottomOnLayout = false
                 scrollToBottom(animated: false)
+            } else {
+                needsScrollToBottomOnLayout = false
             }
         }
 
@@ -457,10 +489,11 @@ import Litext
 
     extension CodeView: UIScrollViewDelegate {
         func scrollViewWillBeginDragging(_: UIScrollView) {
-            // Cancel any queued scroll-to-bottom before it can fire,
-            // then disable auto-scroll so new tokens don't re-engage it.
+            // Cancel any queued scroll-to-bottom before it can fire.
             pendingScrollWorkItem?.cancel()
             pendingScrollWorkItem = nil
+            // Mark that the user is taking manual control.
+            userScrolledAway = true
             autoScrollEnabled = false
         }
 
@@ -471,6 +504,33 @@ import Litext
             lineNumberView.contentOffsetY = offsetY
             // Update the virtual text window (respects hysteresis).
             updateWindowIfNeeded(scrollY: offsetY)
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if !decelerate {
+                checkIfScrolledToBottomAndResumeAutoScroll(scrollView)
+            }
+        }
+
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            checkIfScrolledToBottomAndResumeAutoScroll(scrollView)
+        }
+
+        /// Re-enables auto-scroll if we are streaming and the user has scrolled back to
+        /// (or near) the bottom of the code block.
+        private func checkIfScrolledToBottomAndResumeAutoScroll(_ scrollView: UIScrollView) {
+            guard isStreaming, userScrolledAway else { return }
+            let maxOffset = scrollView.contentSize.height - scrollView.bounds.height
+            guard maxOffset > 0 else { return }
+            // Consider "at the bottom" within 20pt to account for rubber-banding.
+            let isAtBottom = (scrollView.contentOffset.y >= maxOffset - 20)
+            if isAtBottom {
+                userScrolledAway = false
+                autoScrollEnabled = true
+                // Immediately continue auto-scrolling with the next new content.
+                needsScrollToBottomOnLayout = true
+                setNeedsLayout()
+            }
         }
     }
 
