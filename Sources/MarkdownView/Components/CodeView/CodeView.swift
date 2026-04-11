@@ -32,6 +32,21 @@ import Litext
             }
         }
 
+        // MARK: - Bar Hidden
+
+        /// When true, the built-in header bar (language label + copy/preview buttons)
+        /// is hidden so that a container view (e.g. PythonCodeBlockView) can supply
+        /// its own header without producing a "double header" stacked appearance.
+        /// All other features (highlighting, line numbers, scrolling) are preserved.
+        var barHidden: Bool = false {
+            didSet {
+                guard barHidden != oldValue else { return }
+                barView.isHidden = barHidden
+                setNeedsLayout()
+                invalidateIntrinsicContentSize()
+            }
+        }
+
         // MARK: - Streaming / Auto-Scroll State
 
         /// True while the parent MarkdownView is actively streaming content.
@@ -410,7 +425,8 @@ import Litext
 
         override var intrinsicContentSize: CGSize {
             let labelSize = languageLabel.intrinsicContentSize
-            let barHeight = labelSize.height + CodeViewConfiguration.barPadding * 2
+            let computedBarHeight = labelSize.height + CodeViewConfiguration.barPadding * 2
+            let barHeight: CGFloat = barHidden ? 0 : computedBarHeight
             // Use full content height estimate for layout (NOT textView frame height,
             // which is now only the windowed slice).
             let fullContentHeight = fullCodeContentHeight()

@@ -117,6 +117,16 @@ import MarkdownParser
                 }
             }
         }
+
+        /// Shows or hides the built-in header bar on all CodeView subviews.
+        /// Call with `true` when a container view supplies its own header.
+        public func setCodeBlockBarHidden(_ hidden: Bool) {
+            for view in contextViews {
+                if let codeView = view as? CodeView {
+                    codeView.barHidden = hidden
+                }
+            }
+        }
     }
 
 #elseif canImport(AppKit)

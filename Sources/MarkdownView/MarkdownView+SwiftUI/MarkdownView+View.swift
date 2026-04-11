@@ -21,6 +21,9 @@ public struct MarkdownView: View {
     /// When true, all code blocks inside this MarkdownView auto-scroll to their bottom.
     /// Set true during streaming, false when streaming ends.
     public var codeBlockAutoScroll: Bool = false
+    /// When true, the built-in header bar of every code block is hidden.
+    /// Use this when a parent view provides its own header (e.g. PythonCodeBlockView).
+    public var codeBlockBarHidden: Bool = false
 
     @State private var measuredHeight: CGFloat = 0
 
@@ -41,6 +44,15 @@ public struct MarkdownView: View {
         return copy
     }
 
+    /// Fluent setter for codeBlockBarHidden.
+    /// When `hidden` is true, the built-in language/copy/preview bar inside every
+    /// code block is suppressed so a container view can render its own header.
+    public func codeBarHidden(_ hidden: Bool) -> MarkdownView {
+        var copy = self
+        copy.codeBlockBarHidden = hidden
+        return copy
+    }
+
     public var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
@@ -48,6 +60,7 @@ public struct MarkdownView: View {
                     contentSource: contentSource,
                     theme: theme,
                     codeBlockAutoScroll: codeBlockAutoScroll,
+                    codeBlockBarHidden: codeBlockBarHidden,
                     width: proxy.size.width,
                     measuredHeight: $measuredHeight
                 )

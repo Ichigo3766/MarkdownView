@@ -14,6 +14,7 @@ import SwiftUI
         let contentSource: MarkdownView.ContentSource
         let theme: MarkdownTheme
         var codeBlockAutoScroll: Bool = false
+        var codeBlockBarHidden: Bool = false
         let width: CGFloat
         @Binding var measuredHeight: CGFloat
 

@@ -14,11 +14,16 @@ protocol MarkdownViewRepresentableBase {
     /// When true, this view is inside an actively-streaming message.
     /// Used to select the throttled update path and stabilize height.
     var codeBlockAutoScroll: Bool { get }
+    /// When true, the built-in code block header bar is hidden for all code blocks.
+    var codeBlockBarHidden: Bool { get }
     var width: CGFloat { get }
     var heightBinding: Binding<CGFloat> { get }
 }
 
 extension MarkdownViewRepresentableBase {
+    // Default implementation so AppKit conformers don't need to declare this.
+    var codeBlockBarHidden: Bool { false }
+
     func createMarkdownTextView() -> MarkdownTextView {
         let view = MarkdownTextView()
         view.theme = theme
@@ -94,6 +99,7 @@ extension MarkdownViewRepresentableBase {
         }
         #if canImport(UIKit)
         view.setCodeBlockAutoScroll(isStreaming)
+        view.setCodeBlockBarHidden(codeBlockBarHidden)
         #endif
         updateMeasuredHeight(for: view, coordinator: coordinator, isStreaming: isStreaming)
     }

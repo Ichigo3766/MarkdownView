@@ -140,10 +140,14 @@ enum CodeViewConfiguration {
 
         func performLayout() {
             let labelSize = languageLabel.intrinsicContentSize
-            let barHeight = max(languageLabel.font?.lineHeight ?? 16, labelSize.height) + CodeViewConfiguration.barPadding * 2
+            // When barHidden, treat bar height as 0 so content fills the full frame.
+            let computedBarHeight = max(languageLabel.font?.lineHeight ?? 16, labelSize.height) + CodeViewConfiguration.barPadding * 2
+            let barHeight: CGFloat = barHidden ? 0 : computedBarHeight
 
-            layoutBarView(barHeight: barHeight, labelSize: labelSize)
-            layoutButtons()
+            if !barHidden {
+                layoutBarView(barHeight: computedBarHeight, labelSize: labelSize)
+                layoutButtons()
+            }
             layoutLineNumberView(barHeight: barHeight)
             layoutScrollViewAndTextView(barHeight: barHeight)
         }
