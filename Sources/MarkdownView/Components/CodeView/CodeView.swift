@@ -67,6 +67,10 @@ import Litext
                     // Stream ended — disable auto-scroll.
                     autoScrollEnabled = false
                     userScrolledAway = false
+                    // Trigger syntax highlighting now that the full code is available.
+                    // During streaming, triggerAsyncHighlight() is suppressed to prevent
+                    // the epileptic flicker caused by partial highlights firing mid-stream.
+                    triggerAsyncHighlight()
                 }
             }
         }
@@ -163,17 +167,17 @@ import Litext
                     updateLineNumberView()
 
                     // During streaming we suppress highlighting to avoid flicker.
+                    // Always cancel any in-flight highlight task first (regardless of
+                    // whether highlightMap is empty) to prevent a stale task firing.
+                    highlightTask?.cancel()
                     // Clear any stale highlight map so the code renders cleanly
                     // (without leftover colouring from a previous partial highlight).
-                    // The triggerAsyncHighlight() call in the full-rebuild path will
+                    // The triggerAsyncHighlight() call in isStreaming didSet will
                     // fire once streaming is complete and produce the final colouring.
                     if !highlightMap.isEmpty {
                         // Setting highlightMap triggers one applyWindowedText via didSet —
                         // that's acceptable (replaces stale colours with plain text).
                         highlightMap = .init()
-                    } else {
-                        // Map already clear; just cancel any in-flight highlight task.
-                        highlightTask?.cancel()
                     }
 
                     // Coalesce scroll-to-bottom to once per layout pass.
@@ -341,6 +345,9 @@ import Litext
         private var highlightTask: Task<Void, Never>?
 
         private func triggerAsyncHighlight() {
+            // Never start a highlight task while streaming — prevents flicker.
+            // The isStreaming didSet calls us again when the stream ends.
+            guard !isStreaming else { return }
             highlightTask?.cancel()
             let capturedContent = content
             let capturedLanguage = language
