@@ -45,7 +45,7 @@ import MarkdownParser
         var contextViews: [UIView] = []
         var cancellables = Set<AnyCancellable>()
         let contentSubject = CurrentValueSubject<PreprocessedContent, Never>(.init())
-        public var throttleInterval: TimeInterval? = 1 / 20 { // x fps
+        public var throttleInterval: TimeInterval? = nil { // nil = instant per-token updates
             didSet { setupCombine() }
         }
 
@@ -166,7 +166,7 @@ import MarkdownParser
         var contextViews: [NSView] = []
         var cancellables = Set<AnyCancellable>()
         let contentSubject = CurrentValueSubject<PreprocessedContent, Never>(.init())
-        public var throttleInterval: TimeInterval? = 1 / 20 { // x fps
+        public var throttleInterval: TimeInterval? = nil { // nil = instant per-token updates
             didSet { setupCombine() }
         }
 
