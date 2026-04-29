@@ -20,6 +20,7 @@ private let mathPattern: NSRegularExpression? = {
         pattern: pattern,
         options: [
             .caseInsensitive,
+            .allowCommentsAndWhitespace,
         ]
     ) else {
         assertionFailure("failed to create regex for math pattern")
@@ -28,10 +29,33 @@ private let mathPattern: NSRegularExpression? = {
     return regex
 }()
 
+private struct MathMatch {
+    let range: NSRange
+    let content: String
+    let source: String
+}
+
+private func extractMathMatches(in text: String, using regex: NSRegularExpression) -> [MathMatch] {
+    let nsText = text as NSString
+    return regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)).compactMap { match in
+        for rangeIndex in 1 ..< match.numberOfRanges {
+            let captureRange = match.range(at: rangeIndex)
+            guard captureRange.location != NSNotFound else { continue }
+            return MathMatch(
+                range: match.range(at: 0),
+                content: nsText.substring(with: captureRange),
+                source: nsText.substring(with: match.range(at: 0))
+            )
+        }
+        return nil
+    }
+}
+
 public extension MarkdownParser {
-    class MathContext {
-        let document: String
-        var indexedContent: String?
+    final class MathContext {
+        private let document: String
+        private(set) var indexedContent: String?
+        private var sourceContents: [Int: String] = [:]
 
         public fileprivate(set) var contents: [Int: String] = [:]
 
@@ -46,44 +70,48 @@ public extension MarkdownParser {
             }
 
             var document = document
-
-            let matches = regex.matches(
-                in: document,
-                options: [],
-                range: NSRange(location: 0, length: document.count)
-            ).reversed()
+            let matches = extractMathMatches(in: document, using: regex).reversed()
             if matches.isEmpty { return }
 
-            var indexer = 0
-            for match in matches where match.numberOfRanges > 1 {
-                var mathContentRange: NSRange?
-
-                // find the longest capture group
-                for rangeIndex in 1 ..< match.numberOfRanges {
-                    let captureRange = match.range(at: rangeIndex)
-                    if captureRange.location != NSNotFound {
-                        mathContentRange = captureRange
-                        break
-                    }
-                }
-
-                guard let contentRange = mathContentRange else { continue }
-
-                let fullMatchRange = match.range(at: 0)
-                guard let fullRange = Range(fullMatchRange, in: document) else { continue }
-
-                let mathIndex = indexer
-                let mathContent = (document as NSString).substring(with: contentRange)
-
-                indexer += 1
-
-                contents[mathIndex] = mathContent
-
-                let replacement = MarkdownParser.replacementText(for: .math, identifier: String(mathIndex))
+            for match in matches {
+                guard let fullRange = Range(match.range, in: document) else { continue }
+                let replacement = register(content: match.content, source: match.source)
                 document.replaceSubrange(fullRange, with: replacement)
             }
 
             indexedContent = document
+        }
+
+        func register(content: String, source: String? = nil) -> String {
+            let identifier = contents.count
+            contents[identifier] = content
+            sourceContents[identifier] = source
+            return MarkdownParser.replacementText(for: .math, identifier: String(identifier))
+        }
+
+        func inlineNode(forReplacementText text: String) -> MarkdownInlineNode? {
+            guard MarkdownParser.typeForReplacementText(text) == .math,
+                  let identifier = MarkdownParser.identifierForReplacementText(text),
+                  let value = Int(identifier),
+                  let content = contents[value]
+            else {
+                return nil
+            }
+            return .math(
+                content: content,
+                replacementIdentifier: MarkdownParser.replacementText(
+                    for: .math,
+                    identifier: identifier
+                )
+            )
+        }
+
+        func restore(content: String) -> String {
+            contents.sorted(by: { $0.key < $1.key }).reduce(into: content) { partialResult, element in
+                let placeholder = MarkdownParser.replacementText(for: .math, identifier: .init(element.key))
+                let source = sourceContents[element.key] ?? element.value
+                partialResult = partialResult.replacingOccurrences(of: placeholder, with: source)
+            }
         }
     }
 }
@@ -98,6 +126,7 @@ private let mathPatternWithinBlock: NSRegularExpression? = {
         pattern: pattern,
         options: [
             .caseInsensitive,
+            .allowCommentsAndWhitespace,
         ]
     ) else {
         assertionFailure("failed to create regex for math pattern")
@@ -143,21 +172,12 @@ extension MarkdownParser {
             return [.table(columnAlignments: columnAlignments, rows: processedRows)]
         case let .codeBlock(language, content):
             // restore replacement content in code blocks if found, we dont want bad links in code blocks
-            return [.codeBlock(fenceInfo: language, content: restore(content: content, mathContext: mathContext))]
+            return [.codeBlock(fenceInfo: language, content: mathContext.restore(content: content))]
         case let .heading(level: level, content: content):
             return [.heading(level: level, content: finalizeInlineMathInNodes(content, mathContext: mathContext))]
         default:
             return [node]
         }
-    }
-
-    private func restore(content: String, mathContext: MathContext) -> String {
-        var content = content
-        for (index, mathContent) in mathContext.contents.sorted(by: { $0.key < $1.key }) {
-            let placeholder = Self.replacementText(for: .math, identifier: .init(index))
-            content = content.replacingOccurrences(of: placeholder, with: mathContent)
-        }
-        return content
     }
 
     private func finalizeInlineMathInNodes(_ nodes: [MarkdownInlineNode], mathContext: MathContext) -> [MarkdownInlineNode] {
@@ -168,18 +188,8 @@ extension MarkdownParser {
             case let .text(text):
                 result.append(contentsOf: processInlineMath(text, mathContext: mathContext))
             case let .code(content):
-                if Self.typeForReplacementText(content) == .math,
-                   let identifier = Self.identifierForReplacementText(content),
-                   let value = Int(identifier),
-                   let content = mathContext.contents[value]
-                {
-                    result.append(.math(
-                        content: content,
-                        replacementIdentifier: Self.replacementText(
-                            for: .math,
-                            identifier: identifier
-                        )
-                    ))
+                if let mathNode = mathContext.inlineNode(forReplacementText: content) {
+                    result.append(mathNode)
                 } else {
                     result.append(node)
                 }
@@ -202,55 +212,34 @@ extension MarkdownParser {
     }
 
     private func processInlineMath(_ text: String, mathContext: MathContext) -> [MarkdownInlineNode] {
-        let blocks = processInlineMathInTextWithRegExMather(text, mathContext: mathContext).map { [$0] }
-        return blocks.flatMap(\.self)
-    }
-
-    // thought that adding ` to enclosing replacement string is not robust
-    // but it works on my machine
-
-    private func processInlineMathInTextWithRegExMather(_ text: String, mathContext: MathContext) -> [MarkdownInlineNode] {
         guard let regex = mathPatternWithinBlock else { return [.text(text)] }
-
-        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: text.count))
+        let matches = extractMathMatches(in: text, using: regex)
         if matches.isEmpty { return [.text(text)] }
 
+        let nsText = text as NSString
         var result: [MarkdownInlineNode] = []
         var lastEnd = 0
 
         for match in matches {
-            let fullMatchRange = match.range(at: 0)
-            guard fullMatchRange.location != NSNotFound else { continue }
-
-            // 找到第一个有效的捕获组（数学内容）
-            var mathContent: String?
-            for groupIndex in 1 ..< match.numberOfRanges {
-                let captureRange = match.range(at: groupIndex)
-                if captureRange.location != NSNotFound {
-                    mathContent = (text as NSString).substring(with: captureRange)
-                    break
-                }
-            }
-
-            guard let content = mathContent else { continue }
-
-            if fullMatchRange.location > lastEnd {
-                let beforeText = (text as NSString).substring(
-                    with: NSRange(location: lastEnd, length: fullMatchRange.location - lastEnd)
+            if match.range.location > lastEnd {
+                let beforeText = nsText.substring(
+                    with: NSRange(location: lastEnd, length: match.range.location - lastEnd)
                 )
                 if !beforeText.isEmpty { result.append(.text(beforeText)) }
             }
 
-            let mathIndex = mathContext.contents.count
-            mathContext.contents[mathIndex] = content
-            let placeholder = Self.replacementText(for: .math, identifier: .init(mathIndex))
-            result.append(.math(content: content, replacementIdentifier: placeholder))
+            result.append(
+                .math(
+                    content: match.content,
+                    replacementIdentifier: mathContext.register(content: match.content)
+                )
+            )
 
-            lastEnd = fullMatchRange.location + fullMatchRange.length
+            lastEnd = match.range.location + match.range.length
         }
 
-        if lastEnd < text.count {
-            let remainingText = (text as NSString).substring(from: lastEnd)
+        if lastEnd < nsText.length {
+            let remainingText = nsText.substring(from: lastEnd)
             if !remainingText.isEmpty {
                 result.append(.text(remainingText))
             }

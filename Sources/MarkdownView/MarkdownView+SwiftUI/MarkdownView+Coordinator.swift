@@ -12,6 +12,11 @@ final class MarkdownViewCoordinator {
     var lastPreprocessedContent: MarkdownTextView.PreprocessedContent?
     var lastTheme: MarkdownTheme = .default
 
+    /// Incremental parser used only during streaming (`codeBlockAutoScroll == true`).
+    /// Maintains a cached stable prefix so only the short live tail is re-parsed
+    /// each drain tick rather than the full accumulated text.
+    let incrementalParser = IncrementalStreamingParser()
+
     // Height-measurement throttle: during streaming we skip the expensive
     // `boundingSize(for:)` call if we measured less than `heightThrottleInterval`
     // seconds ago. This avoids a full O(n) CoreText layout pass on every token.

@@ -69,9 +69,20 @@ extension MarkdownViewRepresentableBase {
             needsUpdate = coordinator.lastText != text
                 || coordinator.lastTheme != theme
             if needsUpdate {
-                let parser = MarkdownParser()
-                let result = parser.parse(text)
-                content = MarkdownTextView.PreprocessedContent(parserResult: result, theme: theme)
+                if isStreaming {
+                    // Incremental path: only re-parse the short live tail each tick.
+                    // The parser caches the stable prefix (text before the last \n\n)
+                    // so cost per tick is O(tail length) rather than O(full text).
+                    // Reset detection (hasPrefix guard inside the parser) handles
+                    // regeneration and stop/restart without any index arithmetic.
+                    content = coordinator.incrementalParser.parse(text, theme: theme)
+                } else {
+                    // Full parse for non-streaming (final render, previews, etc.)
+                    coordinator.incrementalParser.reset()
+                    let parser = MarkdownParser()
+                    let result = parser.parse(text)
+                    content = MarkdownTextView.PreprocessedContent(parserResult: result, theme: theme)
+                }
                 coordinator.lastText = text
                 coordinator.lastPreprocessedContent = nil
             } else {

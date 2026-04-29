@@ -72,5 +72,10 @@ public struct MarkdownView: View {
             }
         }
         .frame(height: measuredHeight)
+        // Animate height growth smoothly so the layout expands with a gentle easeOut
+        // rather than jumping. Only applies when measuredHeight actually grows (new lines)
+        // — this is the correct place because measuredHeight @State lives here and is
+        // set via DispatchQueue.main.async, bypassing any .animation() applied outside.
+        .animation(.easeOut(duration: 0.15), value: measuredHeight)
     }
 }
