@@ -6,9 +6,6 @@
 //
 
 import SwiftUI
-import os.log
-
-private let markdownUpdateLog = OSLog(subsystem: "com.openui.openui", category: "MarkdownUpdate")
 
 #if canImport(UIKit)
     import UIKit
@@ -31,7 +28,6 @@ private let markdownUpdateLog = OSLog(subsystem: "com.openui.openui", category: 
 
         func updateUIView(_ uiView: MarkdownTextView, context: Context) {
             if case let .text(t) = contentSource {
-                os_log("MARKDOWN updateUIView textLen=%d", log: markdownUpdateLog, type: .debug, t.count)
             }
             updateMarkdownTextView(uiView, coordinator: context.coordinator)
         }

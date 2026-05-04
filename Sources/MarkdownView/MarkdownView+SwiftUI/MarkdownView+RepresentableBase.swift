@@ -138,8 +138,17 @@ extension MarkdownViewRepresentableBase {
         let current = heightBinding.wrappedValue
 
         guard abs(height - current) > 0.5 else { return }
+        // Wrap in a nil-animation transaction so SwiftUI never animates the
+        // height change. Without this, advancing the paragraph-freeze boundary
+        // causes a bounce: the frozen view grows (async height +) while the
+        // live tail shrinks (async height -) and the two deferred updates
+        // play as an animated spring rather than an instant no-op.
         DispatchQueue.main.async {
-            self.heightBinding.wrappedValue = height
+            var tx = Transaction(animation: nil)
+            tx.disablesAnimations = true
+            withTransaction(tx) {
+                self.heightBinding.wrappedValue = height
+            }
         }
     }
 }
