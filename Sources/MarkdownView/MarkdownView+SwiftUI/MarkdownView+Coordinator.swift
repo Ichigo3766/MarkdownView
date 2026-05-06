@@ -17,6 +17,11 @@ final class MarkdownViewCoordinator {
     /// each drain tick rather than the full accumulated text.
     let incrementalParser = IncrementalStreamingParser()
 
+    /// Background parse task for the streaming incremental path.
+    /// Each new tick cancels the previous task so only the latest content wins.
+    /// The parsed `PreprocessedContent` is delivered back on the main actor.
+    var parseTask: Task<Void, Never>? = nil
+
     // Height-measurement throttle: during streaming we skip the expensive
     // `boundingSize(for:)` call if we measured less than `heightThrottleInterval`
     // seconds ago. This avoids a full O(n) CoreText layout pass on every token.

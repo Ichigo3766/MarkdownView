@@ -149,6 +149,19 @@ final class IncrementalStreamingParser {
     /// start mid-block, producing a "double code block" visual artifact during
     /// streaming.
     ///
+    /// **Critical optimisation for large code blocks:**
+    /// If the text ends inside an unclosed fence (i.e. `insideFence == true`
+    /// after the scan), the stable boundary is clamped to the last qualifying
+    /// `\n\n` that appears *before* the opening fence.  Without this clamp the
+    /// entire fence would be the "live tail" and would be re-parsed on every
+    /// drain tick — O(n²) total for a 1 000-line code block.
+    ///
+    /// Note: `StreamingMarkdownView.resolveStreamingCodeBlock` is the primary
+    /// guard that intercepts unclosed fences and routes them to
+    /// `StreamingCodeBlockView` (bypassing this parser entirely).  This clamp
+    /// is defence-in-depth for any code path that still sends fenced content
+    /// through the incremental parser.
+    ///
     /// Returns `0` if no qualifying boundary exists (entire text is the tail).
     private func findStableBoundaryOffset(in text: String) -> Int {
         let minTail = Self.minTailLength
@@ -209,7 +222,20 @@ final class IncrementalStreamingParser {
         }
 
         // ── Walk \n\n positions backwards, skipping those inside a fence ──
-        let searchEndOffset = totalCount - minTail
+        //
+        // When the text ends inside an unclosed fence we further constrain the
+        // search to positions *before* that open fence's start offset.  This
+        // prevents the entire growing code block from becoming the live tail.
+        let openFenceSearchCap: Int
+        if insideFence {
+            // fenceStart is the char offset of the ``` opening line.
+            // We only accept \n\n boundaries that come before it.
+            openFenceSearchCap = fenceStart
+        } else {
+            openFenceSearchCap = totalCount
+        }
+
+        let searchEndOffset = min(totalCount - minTail, openFenceSearchCap)
         guard searchEndOffset > 0 else { return 0 }
         let searchEndIdx = text.index(text.startIndex, offsetBy: searchEndOffset)
         let searchRange = text.startIndex ..< searchEndIdx

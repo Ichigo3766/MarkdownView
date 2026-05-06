@@ -91,15 +91,18 @@ import Litext
             // aligned with the corresponding code line in the scrollView.
             let startY = padding.top - contentOffsetY
 
-            for lineNumber in 1 ... lineCount {
+            // Compute visible line range to avoid iterating ALL lines (O(n) → O(viewport)).
+            let firstVisibleLine = max(1, Int(floor((contentOffsetY - padding.top) / lineSpacing)) + 1)
+            let lastVisibleLine = min(lineCount, Int(ceil((contentOffsetY - padding.top + bounds.height) / lineSpacing)) + 1)
+
+            guard firstVisibleLine <= lastVisibleLine else { return }
+
+            for lineNumber in firstVisibleLine ... lastVisibleLine {
                 let numberString = "\(lineNumber)"
                 let textSize = numberString.size(withAttributes: textAttributes)
 
                 let x = bounds.width - padding.right - textSize.width
                 let y = startY + CGFloat(lineNumber - 1) * lineSpacing + (lineSpacing - textSize.height) / 2
-
-                // Only draw if within the visible bounds
-                guard y + textSize.height > 0, y < bounds.height else { continue }
 
                 let textRect = CGRect(
                     x: x,
@@ -113,10 +116,15 @@ import Litext
         }
 
         func configure(lineCount: Int, contentHeight: CGFloat, font: UIFont, textColor: UIColor) {
-            self.lineCount = lineCount
-            self.contentHeight = contentHeight
-            self.font = font
-            self.textColor = textColor
+            // Guard each property to avoid redundant setNeedsDisplay/invalidateIntrinsicContentSize
+            // on every streaming tick when values haven't actually changed.
+            var needsRedraw = false
+            if self.lineCount != lineCount { self.lineCount = lineCount; needsRedraw = true }
+            if abs(self.contentHeight - contentHeight) > 0.5 { self.contentHeight = contentHeight; needsRedraw = true }
+            if self.font != font { self.font = font; needsRedraw = true }
+            if self.textColor != textColor { self.textColor = textColor; needsRedraw = true }
+            // The didSet on each property already calls setNeedsDisplay, but if none changed we skip entirely.
+            _ = needsRedraw
         }
 
         func updateForContent(_ content: String) {

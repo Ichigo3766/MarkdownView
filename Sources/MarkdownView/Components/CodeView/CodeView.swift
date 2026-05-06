@@ -8,7 +8,7 @@ import Litext
 #if canImport(UIKit)
     import UIKit
 
-    final class CodeView: UIView {
+    public final class CodeView: UIView {
         // MARK: - CONTENT
 
         var theme: MarkdownTheme = .default {
@@ -135,8 +135,12 @@ import Litext
 
         /// Pre-split lines for O(1) window computation.
         private var contentLines: [String] = []
-        /// Character offset of each line's start within `content`. Pre-computed once.
+        /// UTF-16 character offset of each line's start within `content`. Pre-computed once.
         private var lineCharOffsets: [Int] = []
+        /// `String.Index` for each line's start, stored in parallel with `lineCharOffsets`.
+        /// Using a stored `String.Index` for slicing is O(1) — advancing by `offsetBy:`
+        /// from `startIndex` is O(N) and was the hot-path bottleneck at 300+ lines.
+        private var lineStringIndices: [String.Index] = []
         /// The character offset of the currently-rendered window start.
         private var currentWindowCharOffset: Int = 0
         /// The scroll offset at which we last updated the window (hysteresis tracking).
@@ -163,8 +167,13 @@ import Litext
                     // Nudge layout so contentSize reflects the extra lines.
                     setNeedsLayout()
 
-                    lineNumberView.updateForContent(content)
-                    updateLineNumberView()
+                    // Update line number count directly from pre-computed index (O(1))
+                    // instead of calling updateForContent which splits the entire string (O(n)).
+                    let newLineCount = max(contentLines.count, 1)
+                    if lineNumberView.lineCount != newLineCount {
+                        lineNumberView.lineCount = newLineCount
+                        lineNumberView.contentHeight = fullCodeContentHeight()
+                    }
 
                     // During streaming we suppress highlighting to avoid flicker.
                     // Always cancel any in-flight highlight task first (regardless of
@@ -216,19 +225,33 @@ import Litext
             let lines = content.components(separatedBy: .newlines)
             contentLines = lines
             var offsets: [Int] = []
+            var stringIndices: [String.Index] = []
             offsets.reserveCapacity(lines.count)
+            stringIndices.reserveCapacity(lines.count)
             var charOffset = 0
+            var idx = content.startIndex
             for line in lines {
                 offsets.append(charOffset)
-                // +1 for the newline character
-                charOffset += line.utf16.count + 1
+                stringIndices.append(idx)
+                let advance = line.utf16.count + 1  // +1 for the newline character
+                charOffset += advance
+                // Advance the stored String.Index forward by `advance` UTF-16 code units.
+                // This is O(delta per line) during the rebuild, but the stored index is
+                // then reused as an O(1) cursor in appendToLineIndex / contentSlice.
+                let remaining = content.utf16.distance(from: idx, to: content.endIndex)
+                if advance <= remaining {
+                    idx = content.utf16.index(idx, offsetBy: advance)
+                } else {
+                    idx = content.endIndex
+                }
             }
             lineCharOffsets = offsets
+            lineStringIndices = stringIndices
         }
 
         /// Incremental line index update for streaming appends.
         /// Only touches the last (incomplete) line of `oldContent` and any new
-        /// lines that follow it — O(delta) instead of O(n).
+        /// lines that follow it — O(delta) instead of O(N).
         private func appendToLineIndex(oldContent: String) {
             guard !contentLines.isEmpty else {
                 // Safety fallback: no existing index — do a full rebuild.
@@ -241,10 +264,21 @@ import Litext
             let lastOldLineIdx = contentLines.count - 1
             let lastOldLineCharOffset = lineCharOffsets[lastOldLineIdx]
 
-            // Extract the suffix of content starting at the last old line's offset.
-            let utf16 = content.utf16
-            let suffixStart = utf16.index(utf16.startIndex, offsetBy: min(lastOldLineCharOffset, utf16.count))
-            let suffix = String(utf16[suffixStart...]) ?? String(content[content.index(content.startIndex, offsetBy: min(lastOldLineCharOffset, content.count))...])
+            // Use the pre-stored String.Index for the last old line start — O(1).
+            // Previously this was: utf16.index(utf16.startIndex, offsetBy: lastOldLineCharOffset)
+            // which is O(N) and was the main hot-path bottleneck at 300+ lines.
+            let suffixStartIndex: String.Index
+            if lastOldLineIdx < lineStringIndices.count {
+                suffixStartIndex = lineStringIndices[lastOldLineIdx]
+            } else {
+                // Safety fallback: recompute from offset (should never happen in practice).
+                let utf16 = content.utf16
+                let clamped = min(lastOldLineCharOffset, utf16.count)
+                suffixStartIndex = utf16.index(utf16.startIndex, offsetBy: clamped)
+                    .samePosition(in: content) ?? content.startIndex
+            }
+
+            let suffix = String(content[suffixStartIndex...])
 
             // Split the suffix into lines.
             let suffixLines = suffix.components(separatedBy: .newlines)
@@ -252,32 +286,55 @@ import Litext
             // Replace the last old line and append any genuinely new ones.
             contentLines.removeLast()
             lineCharOffsets.removeLast()
+            lineStringIndices.removeLast()
 
             var charOffset = lastOldLineCharOffset
+            var idx = suffixStartIndex
             for line in suffixLines {
                 contentLines.append(line)
                 lineCharOffsets.append(charOffset)
-                charOffset += line.utf16.count + 1
+                lineStringIndices.append(idx)
+                let advance = line.utf16.count + 1
+                charOffset += advance
+                // Advance the stored index by the line length + newline (O(delta)).
+                let remaining = content.utf16.distance(from: idx, to: content.endIndex)
+                if advance <= remaining {
+                    idx = content.utf16.index(idx, offsetBy: advance)
+                } else {
+                    idx = content.endIndex
+                }
             }
         }
 
         /// Returns a slice of `content` covering `lineStart ..< lineEnd` (line indices),
         /// plus the character offset of that slice's first character.
+        ///
+        /// Uses pre-stored `lineStringIndices` for O(1) slice bounds — previously this
+        /// called `utf16.index(startIndex, offsetBy:)` twice per token, each O(N) in
+        /// content length and the second-largest bottleneck at 300+ lines.
         private func contentSlice(lineStart: Int, lineEnd: Int) -> (slice: String, charOffset: Int) {
             guard !contentLines.isEmpty else { return (content, 0) }
             let clampedStart = max(0, min(lineStart, contentLines.count - 1))
             let clampedEnd = max(clampedStart + 1, min(lineEnd, contentLines.count))
             let charStart = lineCharOffsets[clampedStart]
-            // charEnd: start of first line AFTER our slice, or end of content
-            let charEnd: Int
-            if clampedEnd < contentLines.count {
-                charEnd = lineCharOffsets[clampedEnd]
+
+            // Use stored String.Index cursors — O(1) lookup, no traversal from startIndex.
+            let startIdx: String.Index
+            if clampedStart < lineStringIndices.count {
+                startIdx = lineStringIndices[clampedStart]
             } else {
-                charEnd = content.utf16.count
+                startIdx = content.utf16.index(content.utf16.startIndex, offsetBy: min(charStart, content.utf16.count))
+                    .samePosition(in: content) ?? content.startIndex
             }
-            let startIdx = content.utf16.index(content.utf16.startIndex, offsetBy: min(charStart, content.utf16.count))
-            let endIdx = content.utf16.index(content.utf16.startIndex, offsetBy: min(charEnd, content.utf16.count))
-            let slice = String(content.utf16[startIdx ..< endIdx]) ?? String(content[content.index(content.startIndex, offsetBy: min(charStart, content.count)) ..< content.index(content.startIndex, offsetBy: min(charEnd, content.count))])
+
+            let endIdx: String.Index
+            if clampedEnd < lineStringIndices.count {
+                endIdx = lineStringIndices[clampedEnd]
+            } else {
+                endIdx = content.endIndex
+            }
+
+            let slice = String(content[startIdx ..< endIdx])
             return (slice, charStart)
         }
 
@@ -404,7 +461,7 @@ import Litext
             CodeViewConfiguration.intrinsicHeight(for: content, theme: theme)
         }
 
-        override func layoutSubviews() {
+        override public func layoutSubviews() {
             super.layoutSubviews()
             performLayout()
             updateLineNumberView()
@@ -430,7 +487,7 @@ import Litext
             }
         }
 
-        override var intrinsicContentSize: CGSize {
+        override public var intrinsicContentSize: CGSize {
             let labelSize = languageLabel.intrinsicContentSize
             let computedBarHeight = labelSize.height + CodeViewConfiguration.barPadding * 2
             let barHeight: CGFloat = barHidden ? 0 : computedBarHeight
@@ -504,14 +561,14 @@ import Litext
     private typealias CGViewConfiguration = CodeViewConfiguration
 
     extension CodeView: LTXAttributeStringRepresentable {
-        func attributedStringRepresentation() -> NSAttributedString {
+        public func attributedStringRepresentation() -> NSAttributedString {
             // Return the full highlighted content (not just the window) for copy/share.
             highlightMap.apply(to: content, with: theme)
         }
     }
 
     extension CodeView: UIScrollViewDelegate {
-        func scrollViewWillBeginDragging(_: UIScrollView) {
+        public func scrollViewWillBeginDragging(_: UIScrollView) {
             // Cancel any queued scroll-to-bottom before it can fire.
             pendingScrollWorkItem?.cancel()
             pendingScrollWorkItem = nil
@@ -520,7 +577,7 @@ import Litext
             autoScrollEnabled = false
         }
 
-        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        public func scrollViewDidScroll(_ scrollView: UIScrollView) {
             updateScrollFABVisibility()
             // Keep the line number view vertically aligned with the scrolled content.
             let offsetY = scrollView.contentOffset.y
@@ -529,13 +586,13 @@ import Litext
             updateWindowIfNeeded(scrollY: offsetY)
         }
 
-        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
             if !decelerate {
                 checkIfScrolledToBottomAndResumeAutoScroll(scrollView)
             }
         }
 
-        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
             checkIfScrolledToBottomAndResumeAutoScroll(scrollView)
         }
 
@@ -560,7 +617,7 @@ import Litext
 #elseif canImport(AppKit)
     import AppKit
 
-    final class CodeView: NSView {
+    public final class CodeView: NSView {
         var theme: MarkdownTheme = .default {
             didSet {
                 languageLabel.font = theme.fonts.code
