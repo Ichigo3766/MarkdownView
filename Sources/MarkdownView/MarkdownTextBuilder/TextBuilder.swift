@@ -12,7 +12,7 @@ import MarkdownParser
     import AppKit
 #endif
 
-final class TextBuilder {
+@MainActor final class TextBuilder {
     private let nodes: [MarkdownBlockNode]
     private let viewProvider: ReusableViewProvider
     private var theme: MarkdownTheme = .default

@@ -40,10 +40,6 @@ Major rendering pipeline overhaul to keep 120Hz ProMotion smooth during long AI 
 - **Throttled height measurement**: `boundingSize(for:)` / `intrinsicContentSize` (a full O(n) CoreText layout pass) is throttled to at most once per 150ms during streaming. Immediately measured when streaming ends or content changes.
 - **`buildSingleBlock`**: New `TextBuilder.buildSingleBlock(node:view:viewProvider:)` method that renders a single `MarkdownBlockNode` in isolation, enabling the incremental path without a full document rebuild.
 
-## Preview
-
-![Preview](./Resources/Simulator%20Screenshot%20-%20iPad%20mini%20(A17%20Pro)%20-%202025-05-27%20at%2003.03.27.png)
-
 ## Features
 
 - 🚀 **Real-time Rendering**: Live Markdown parsing and rendering as you type
