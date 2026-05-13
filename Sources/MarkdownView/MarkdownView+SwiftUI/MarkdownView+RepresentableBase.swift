@@ -16,8 +16,6 @@ protocol MarkdownViewRepresentableBase {
     var codeBlockAutoScroll: Bool { get }
     /// When true, the built-in code block header bar is hidden for all code blocks.
     var codeBlockBarHidden: Bool { get }
-    var width: CGFloat { get }
-    var heightBinding: Binding<CGFloat> { get }
 }
 
 extension MarkdownViewRepresentableBase {
@@ -67,12 +65,11 @@ extension MarkdownViewRepresentableBase {
             let themeChanged = coordinator.lastTheme != theme
 
             guard textChanged || themeChanged else {
-                // Nothing changed — still update height in case layout pass was skipped.
+                // Nothing changed — still update code block flags.
                 #if canImport(UIKit)
                 view.setCodeBlockAutoScroll(isStreaming)
                 view.setCodeBlockBarHidden(codeBlockBarHidden)
                 #endif
-                updateMeasuredHeight(for: view, coordinator: coordinator, isStreaming: isStreaming)
                 return
             }
 
@@ -101,16 +98,15 @@ extension MarkdownViewRepresentableBase {
                     guard !Task.isCancelled else { return }
 
                     await MainActor.run { [weak coordinator] in
-                        guard let coordinator else { return }
+                        guard coordinator != nil else { return }
                         view.theme = capturedTheme
                         view.setMarkdownManually(parsed)
+                        // Invalidate so sizeThatFits is re-queried on the next layout pass.
                         view.invalidateIntrinsicContentSize()
-                        coordinator.lastHeightMeasureTime = 0
                         #if canImport(UIKit)
                         view.setCodeBlockAutoScroll(true)
                         view.setCodeBlockBarHidden(codeBlockBarHidden)
                         #endif
-                        updateMeasuredHeight(for: view, coordinator: coordinator, isStreaming: true)
                     }
                 }
                 // Return immediately — the Task delivers the result asynchronously.
@@ -135,17 +131,15 @@ extension MarkdownViewRepresentableBase {
                     guard !Task.isCancelled else { return }
 
                     await MainActor.run { [weak coordinator] in
-                        guard let coordinator else { return }
+                        guard coordinator != nil else { return }
                         view.theme = capturedTheme
                         view.setMarkdownManually(preprocessed)
+                        // Invalidate so sizeThatFits is re-queried on the next layout pass.
                         view.invalidateIntrinsicContentSize()
-                        coordinator.lastTheme = capturedTheme
-                        coordinator.lastHeightMeasureTime = 0
                         #if canImport(UIKit)
                         view.setCodeBlockAutoScroll(false)
                         view.setCodeBlockBarHidden(codeBlockBarHidden)
                         #endif
-                        updateMeasuredHeight(for: view, coordinator: coordinator, isStreaming: false)
                     }
                 }
                 return
@@ -161,50 +155,11 @@ extension MarkdownViewRepresentableBase {
                 view.theme = theme
                 view.setMarkdownManually(preprocessedContent)
                 view.invalidateIntrinsicContentSize()
-                coordinator.lastHeightMeasureTime = 0
             }
             #if canImport(UIKit)
             view.setCodeBlockAutoScroll(isStreaming)
             view.setCodeBlockBarHidden(codeBlockBarHidden)
             #endif
-            updateMeasuredHeight(for: view, coordinator: coordinator, isStreaming: isStreaming)
-        }
-    }
-
-    func updateMeasuredHeight(
-        for view: MarkdownTextView,
-        coordinator: MarkdownViewCoordinator,
-        isStreaming: Bool = false
-    ) {
-        guard width.isFinite, width > 0 else { return }
-
-        // During streaming, calling `boundingSize(for:)` on every token causes
-        // a full O(n) CoreText layout pass on the entire growing attributed string.
-        // Throttle to at most once per `heightThrottleInterval` seconds while
-        // streaming; always measure immediately when streaming ends or content changes.
-        if isStreaming {
-            let now = CFAbsoluteTimeGetCurrent()
-            let elapsed = now - coordinator.lastHeightMeasureTime
-            guard elapsed >= MarkdownViewCoordinator.heightThrottleInterval else { return }
-            coordinator.lastHeightMeasureTime = now
-        }
-
-        let size = view.boundingSize(for: width)
-        let height = ceil(size.height)
-        let current = heightBinding.wrappedValue
-
-        guard abs(height - current) > 0.5 else { return }
-        // Wrap in a nil-animation transaction so SwiftUI never animates the
-        // height change. Without this, advancing the paragraph-freeze boundary
-        // causes a bounce: the frozen view grows (async height +) while the
-        // live tail shrinks (async height -) and the two deferred updates
-        // play as an animated spring rather than an instant no-op.
-        DispatchQueue.main.async {
-            var tx = Transaction(animation: nil)
-            tx.disablesAnimations = true
-            withTransaction(tx) {
-                self.heightBinding.wrappedValue = height
-            }
         }
     }
 }

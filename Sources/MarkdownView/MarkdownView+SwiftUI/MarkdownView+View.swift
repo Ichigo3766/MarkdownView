@@ -25,8 +25,6 @@ public struct MarkdownView: View {
     /// Use this when a parent view provides its own header (e.g. PythonCodeBlockView).
     public var codeBlockBarHidden: Bool = false
 
-    @State private var measuredHeight: CGFloat = 0
-
     public init(_ text: String, theme: MarkdownTheme = .default) {
         contentSource = .text(text)
         self.theme = theme
@@ -54,28 +52,25 @@ public struct MarkdownView: View {
     }
 
     public var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .topLeading) {
-                MarkdownViewRepresentable(
-                    contentSource: contentSource,
-                    theme: theme,
-                    codeBlockAutoScroll: codeBlockAutoScroll,
-                    codeBlockBarHidden: codeBlockBarHidden,
-                    width: proxy.size.width,
-                    measuredHeight: $measuredHeight
-                )
-                .frame(
-                    width: proxy.size.width,
-                    height: measuredHeight,
-                    alignment: .topLeading
-                )
-            }
-        }
-        .frame(height: measuredHeight)
-        // Animate height growth smoothly so the layout expands with a gentle easeOut
-        // rather than jumping. Only applies when measuredHeight actually grows (new lines)
-        // — this is the correct place because measuredHeight @State lives here and is
-        // set via DispatchQueue.main.async, bypassing any .animation() applied outside.
-        .animation(.easeOut(duration: 0.15), value: measuredHeight)
+        // Use sizeThatFits on the representable — the UIViewRepresentable protocol method
+        // is called synchronously during SwiftUI's layout pass and returns the correct
+        // height without any @State feedback loop.
+        //
+        // The old GeometryReader + @State measuredHeight + DispatchQueue.main.async write
+        // pattern created an AttributeGraph cycle: writing @State from updateUIView caused
+        // SwiftUI to re-evaluate body mid-layout, which re-entered updateUIView, which
+        // dispatched another async write — spamming "AttributeGraph: cycle detected" on
+        // every prompt send and at every animation interpolation tick (60fps × N messages).
+        //
+        // With sizeThatFits SwiftUI reads size directly from the representable; when async
+        // parsing completes, invalidateIntrinsicContentSize() on the MarkdownTextView tells
+        // SwiftUI to re-measure — no @State, no cycle.
+        MarkdownViewRepresentable(
+            contentSource: contentSource,
+            theme: theme,
+            codeBlockAutoScroll: codeBlockAutoScroll,
+            codeBlockBarHidden: codeBlockBarHidden
+        )
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

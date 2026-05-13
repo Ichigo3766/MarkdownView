@@ -43,6 +43,11 @@ import MarkdownParser
         var cachedAttributedString: NSMutableAttributedString = .init()
 
         var contextViews: [UIView] = []
+        /// Cached value for setCodeBlockAutoScroll — guards against O(n_views) iteration
+        /// on every no-change updateUIView call during streaming (60fps × N messages).
+        private var _autoScrollEnabled: Bool = false
+        /// Cached value for setCodeBlockBarHidden — same guard pattern.
+        private var _barHidden: Bool = false
         var cancellables = Set<AnyCancellable>()
         let contentSubject = CurrentValueSubject<PreprocessedContent, Never>(.init())
         public var throttleInterval: TimeInterval? = nil { // nil = instant per-token updates
@@ -110,7 +115,13 @@ import MarkdownParser
 
         /// Enables or disables auto-scroll-to-bottom on all CodeView subviews.
         /// Call with `true` during streaming, `false` when streaming ends.
+        /// Guards against no-op iterations: since updateUIView (via RepresentableBase)
+        /// calls this on every layout pass even when content hasn't changed, iterating
+        /// all contextViews O(n_views) per frame was wasting CPU at 60fps. We skip the
+        /// loop entirely when the value hasn't changed.
         public func setCodeBlockAutoScroll(_ enabled: Bool) {
+            guard enabled != _autoScrollEnabled else { return }
+            _autoScrollEnabled = enabled
             for view in contextViews {
                 if let codeView = view as? CodeView {
                     codeView.isStreaming = enabled
@@ -121,6 +132,8 @@ import MarkdownParser
         /// Shows or hides the built-in header bar on all CodeView subviews.
         /// Call with `true` when a container view supplies its own header.
         public func setCodeBlockBarHidden(_ hidden: Bool) {
+            guard hidden != _barHidden else { return }
+            _barHidden = hidden
             for view in contextViews {
                 if let codeView = view as? CodeView {
                     codeView.barHidden = hidden
