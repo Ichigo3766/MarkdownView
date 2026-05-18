@@ -10,11 +10,11 @@
 
     public extension UIFont {
         var bold: UIFont {
-            UIFont(descriptor: fontDescriptor.withSymbolicTraits(.traitBold)!, size: 0)
+            UIFont(descriptor: fontDescriptor.withSymbolicTraits(.traitBold) ?? fontDescriptor, size: 0)
         }
 
         var italic: UIFont {
-            UIFont(descriptor: fontDescriptor.withSymbolicTraits(.traitItalic)!, size: 0)
+            UIFont(descriptor: fontDescriptor.withSymbolicTraits(.traitItalic) ?? fontDescriptor, size: 0)
         }
 
         var monospaced: UIFont {

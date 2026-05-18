@@ -195,12 +195,13 @@ extension TextBuilder {
                 blockquoteMarkingStorage = boundingBox.maxY
             }
             .withBlockquoteDrawing { context, line, lineOrigin in
+                guard let markingY = blockquoteMarkingStorage else { return }
                 let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
                 defer { blockquoteMarkingStorage = nil }
-                let quotingLineHeight: CGFloat = blockquoteMarkingStorage! - boundingBox.minY
+                let quotingLineHeight: CGFloat = markingY - boundingBox.minY
                 let lineRect = CGRect(
                     x: 0,
-                    y: blockquoteMarkingStorage! - quotingLineHeight,
+                    y: markingY - quotingLineHeight,
                     width: 4,
                     height: quotingLineHeight
                 )
@@ -369,12 +370,13 @@ extension TextBuilder {
                 blockquoteMarkingStorage = boundingBox.maxY
             }
             .withBlockquoteDrawing { context, line, lineOrigin in
+                guard let markingY = blockquoteMarkingStorage else { return }
                 let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
                 defer { blockquoteMarkingStorage = nil }
-                let quotingLineHeight: CGFloat = blockquoteMarkingStorage! - boundingBox.minY
+                let quotingLineHeight: CGFloat = markingY - boundingBox.minY
                 let lineRect = CGRect(
                     x: 0,
-                    y: blockquoteMarkingStorage! - quotingLineHeight,
+                    y: markingY - quotingLineHeight,
                     width: 4,
                     height: quotingLineHeight
                 )
