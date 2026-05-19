@@ -685,7 +685,7 @@ import Litext
             fatalError("init(coder:) has not been implemented")
         }
 
-        override var isFlipped: Bool {
+        override public var isFlipped: Bool {
             true
         }
 
@@ -693,13 +693,13 @@ import Litext
             CodeViewConfiguration.intrinsicHeight(for: content, theme: theme)
         }
 
-        override func layout() {
+        override public func layout() {
             super.layout()
             performLayout()
             updateLineNumberView()
         }
 
-        override var intrinsicContentSize: CGSize {
+        override public var intrinsicContentSize: CGSize {
             let labelSize = languageLabel.intrinsicContentSize
             let barHeight = labelSize.height + CodeViewConfiguration.barPadding * 2
             let textSize = textView.intrinsicContentSize
@@ -753,7 +753,7 @@ import Litext
     }
 
     extension CodeView: LTXAttributeStringRepresentable {
-        func attributedStringRepresentation() -> NSAttributedString {
+        public func attributedStringRepresentation() -> NSAttributedString {
             textView.attributedText
         }
     }

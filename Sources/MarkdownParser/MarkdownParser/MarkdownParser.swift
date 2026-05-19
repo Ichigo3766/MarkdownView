@@ -33,7 +33,7 @@ public final class MarkdownParser: Sendable {
         return block(parser)
     }
 
-    public struct ParseResult: Sendable {
+    public struct ParseResult: @unchecked Sendable {
         public let document: [MarkdownBlockNode]
         public let mathContext: [Int: String]
     }

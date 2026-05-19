@@ -97,7 +97,7 @@ extension TextBuilder {
                 }
             }
             .withNumberedDrawing { context, line, lineOrigin, num in
-                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                _ = lineBoundingBox(line, lineOrigin: lineOrigin)
                 let textColor = populateContextColorFromFirstRun(context: context, line: line)
                 let numText = "\(num)."
                 let font = theme.fonts.body
@@ -262,7 +262,7 @@ extension TextBuilder {
                 }
             }
             .withNumberedDrawing { context, line, lineOrigin, num in
-                let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
+                _ = lineBoundingBox(line, lineOrigin: lineOrigin)
                 let textColor = populateContextColorFromFirstRun(context: context, line: line)
                 // Draw "1." LEFT-aligned at a FIXED x, exactly like bullets.
                 // Bullets: fixed x = boundingBox.minX - 16
