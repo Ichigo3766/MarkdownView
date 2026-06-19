@@ -20,7 +20,8 @@ private let mathPattern: NSRegularExpression? = {
         pattern: pattern,
         options: [
             .caseInsensitive,
-            .allowCommentsAndWhitespace,
+            // NOTE: Do NOT add .allowCommentsAndWhitespace here — the spaces in
+            // \[ ... \] and \( ... \) patterns are intentional mandatory delimiters.
         ]
     ) else {
         assertionFailure("failed to create regex for math pattern")
@@ -119,14 +120,16 @@ public extension MarkdownParser {
 private let mathPatternWithinBlock: NSRegularExpression? = {
     let patterns = [
         ###"\\\( ([^\r\n]+?) \\\)"###, // 行内公式 \(...\)
-        ###"\$ ([^\r\n]+?) \$"###, // 行内公式 $ ... $
+        ###"\$ ([^\r\n]+?) \$"###, // 行内公式 $ ... $ (spaces required to avoid matching currency like $50)
     ]
     let pattern = patterns.joined(separator: "|")
     guard let regex = try? NSRegularExpression(
         pattern: pattern,
         options: [
             .caseInsensitive,
-            .allowCommentsAndWhitespace,
+            // NOTE: Do NOT add .allowCommentsAndWhitespace here — the spaces in
+            // the $ ... $ pattern are intentional mandatory delimiters that
+            // prevent currency values like "$50-$100" from being matched as math.
         ]
     ) else {
         assertionFailure("failed to create regex for math pattern")

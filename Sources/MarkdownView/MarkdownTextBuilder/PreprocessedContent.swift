@@ -11,8 +11,14 @@ import MarkdownParser
 public extension MarkdownTextView {
     final class PreprocessedContent {
         public let blocks: [MarkdownBlockNode]
-        public let rendered: RenderedTextContent.Map
+        /// Math render map — mutable so the async math-render pass can populate it
+        /// without rebuilding the entire PreprocessedContent object.
+        public var rendered: RenderedTextContent.Map
         public let highlightMaps: [Int: CodeHighlighter.HighlightMap]
+
+        /// Raw LaTeX strings keyed by equation index, carried from the parse result.
+        /// Used by the async render pass to produce images off the main thread.
+        public let mathContext: [Int: String]
 
         public init(
             blocks: [MarkdownBlockNode],
@@ -22,22 +28,68 @@ public extension MarkdownTextView {
             self.blocks = blocks
             self.rendered = rendered
             self.highlightMaps = highlightMaps
+            self.mathContext = [:]
+        }
+
+        /// Fast init: parses but does NOT render math images.
+        /// The caller should fire `renderMathAsync(theme:)` to fill `rendered` off-thread.
+        public init(parserResultNoMath parserResult: MarkdownParser.ParseResult) {
+            blocks = parserResult.document
+            rendered = [:]
+            highlightMaps = [:]
+            mathContext = parserResult.mathContext
         }
 
         public init(parserResult: MarkdownParser.ParseResult, theme: MarkdownTheme) {
             blocks = parserResult.document
             rendered = parserResult.render(theme: theme)
-            // Always empty — highlighting is now lazy and async.
-            // Each CodeView triggers its own async highlight via HighlighterSwift
-            // when it becomes visible. This eliminates the O(n²) sync blocking
-            // that caused 3GB+ memory and lag during streaming.
             highlightMaps = [:]
+            mathContext = parserResult.mathContext
         }
 
         public init() {
             blocks = .init()
             rendered = .init()
             highlightMaps = .init()
+            mathContext = [:]
+        }
+
+        /// True when there are equations that have not yet been rendered to images.
+        public var hasPendingMath: Bool {
+            !mathContext.isEmpty && rendered.isEmpty
+        }
+
+        /// Renders all equations to images on a background thread.
+        /// Merges results into `self.rendered` and calls `completion` on the main actor.
+        public func renderMathAsync(theme: MarkdownTheme, completion: @escaping @MainActor () -> Void) {
+            guard hasPendingMath else {
+                Task { @MainActor in completion() }
+                return
+            }
+            let contextSnapshot = mathContext
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
+                var map: RenderedTextContent.Map = [:]
+                for (key, value) in contextSnapshot {
+                    guard !Task.isCancelled else { return }
+                    var image = MathRenderer.renderToImage(
+                        latex: value,
+                        fontSize: theme.fonts.body.pointSize,
+                        textColor: theme.colors.body
+                    )
+                    #if canImport(UIKit)
+                    image = image?.withRenderingMode(.alwaysTemplate)
+                    #endif
+                    let replacementText = MarkdownParser.replacementText(for: .math, identifier: .init(key))
+                    map[replacementText] = RenderedTextContent(image: image, text: value)
+                }
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.rendered = map
+                    completion()
+                }
+            }
         }
     }
 }

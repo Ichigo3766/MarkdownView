@@ -42,6 +42,7 @@ final class IncrementalStreamingParser {
     private var cachedBlocks: [MarkdownBlockNode] = []
 
     /// Pre-rendered math map for `cachedText`.
+    /// During streaming we skip synchronous math rendering, so this stays empty.
     private var cachedRendered: RenderedTextContent.Map = [:]
 
     /// The theme used when building `cachedBlocks`/`cachedRendered`.
@@ -110,9 +111,12 @@ final class IncrementalStreamingParser {
         }
 
         // ── 5. Parse the live tail (always small) ─────────────────────────
+        // Math rendering is skipped during streaming to avoid blocking the
+        // drain loop. Equations will appear as placeholder text while the
+        // stream is active and render properly once streaming finishes and
+        // the non-streaming path takes over.
         let parser = MarkdownParser()
         let tailResult = parser.parse(tailText)
-        let tailRendered: RenderedTextContent.Map = tailResult.render(theme: theme)
 
         // ── 6. Update stable cache if the boundary advanced ───────────────
         // Only re-parse and cache the new stable portion when the boundary
@@ -122,17 +126,16 @@ final class IncrementalStreamingParser {
             let newStableText = String(newText[..<newStableEndIdx])
             let stableResult = parser.parse(newStableText)
             cachedBlocks = stableResult.document
-            cachedRendered = stableResult.render(theme: theme)
+            // No math render during streaming — keep cachedRendered empty.
             cachedText = newStableText
         }
 
         // ── 7. Merge stable + tail ────────────────────────────────────────
         let allBlocks = cachedBlocks + tailResult.document
-        let allRendered = cachedRendered.merging(tailRendered) { _, new in new }
 
         return MarkdownTextView.PreprocessedContent(
             blocks: allBlocks,
-            rendered: allRendered,
+            rendered: [:],
             highlightMaps: [:]
         )
     }

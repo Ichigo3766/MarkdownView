@@ -119,6 +119,7 @@ extension MarkdownViewRepresentableBase {
 
                 let capturedText = text
                 let capturedTheme = theme
+                let capturedCodeBlockBarHidden = codeBlockBarHidden
 
                 coordinator.lastText = text
                 coordinator.lastTheme = theme
@@ -127,19 +128,27 @@ extension MarkdownViewRepresentableBase {
                     guard !Task.isCancelled else { return }
                     let parser = MarkdownParser()
                     let result = parser.parse(capturedText)
-                    let preprocessed = MarkdownTextView.PreprocessedContent(parserResult: result, theme: capturedTheme)
+                    // Pass 1: deliver text immediately (no math images yet).
+                    let preprocessed = MarkdownTextView.PreprocessedContent(parserResultNoMath: result)
                     guard !Task.isCancelled else { return }
 
                     await MainActor.run { [weak coordinator] in
                         guard coordinator != nil else { return }
                         view.theme = capturedTheme
                         view.setMarkdownManually(preprocessed)
-                        // Invalidate so sizeThatFits is re-queried on the next layout pass.
                         view.invalidateIntrinsicContentSize()
                         #if canImport(UIKit)
                         view.setCodeBlockAutoScroll(false)
-                        view.setCodeBlockBarHidden(codeBlockBarHidden)
+                        view.setCodeBlockBarHidden(capturedCodeBlockBarHidden)
                         #endif
+                    }
+
+                    // Pass 2: render math off-thread, then refresh the view.
+                    guard !Task.isCancelled else { return }
+                    preprocessed.renderMathAsync(theme: capturedTheme) { @MainActor in
+                        guard coordinator != nil else { return }
+                        view.setMarkdownManually(preprocessed)
+                        view.invalidateIntrinsicContentSize()
                     }
                 }
                 return

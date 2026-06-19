@@ -23,6 +23,7 @@ public enum MathRenderer {
         latex
             .replacingOccurrences(of: "\\dots", with: "\\ldots")
             .replacingOccurrences(of: "\\implies", with: "\\Rightarrow")
+            .replacingOccurrences(of: "\\iff", with: "\\Leftrightarrow")
             .replacingOccurrences(of: "\\begin{align}", with: "\\begin{aligned}")
             .replacingOccurrences(of: "\\end{align}", with: "\\end{aligned}")
             .replacingOccurrences(of: "\\begin{align*}", with: "\\begin{aligned}")
@@ -30,6 +31,7 @@ public enum MathRenderer {
             .replacingOccurrences(of: "\\begin{cases}", with: "\\left\\{\\begin{matrix}")
             .replacingOccurrences(of: "\\end{cases}", with: "\\end{matrix}\\right.")
             .replacingOccurrences(of: "\\dfrac", with: "\\frac")
+            .replacingOperatornameCommand()
             .replacingBoxedCommand()
     }
 
@@ -101,6 +103,33 @@ private extension String {
     func substring(with range: NSRange) -> String? {
         guard let swiftRange = Range(range, in: self) else { return nil }
         return String(self[swiftRange])
+    }
+
+    /// Converts \operatorname{foo} → \mathrm{foo} so SwiftMath can render it.
+    func replacingOperatornameCommand() -> String {
+        var result = self
+        while let range = result.range(of: "\\operatorname{") {
+            let startIndex = range.upperBound
+            var braceCount = 1
+            var endIndex = startIndex
+
+            while endIndex < result.endIndex, braceCount > 0 {
+                let char = result[endIndex]
+                if char == "{" { braceCount += 1 }
+                else if char == "}" { braceCount -= 1 }
+                if braceCount > 0 { endIndex = result.index(after: endIndex) }
+            }
+
+            if braceCount == 0 {
+                let content = String(result[startIndex ..< endIndex])
+                let fullRange = range.lowerBound ... endIndex
+                result.replaceSubrange(fullRange, with: "\\mathrm{\(content)}")
+            } else {
+                result.replaceSubrange(range, with: "\\mathrm{")
+                break
+            }
+        }
+        return result
     }
 
     func replacingBoxedCommand() -> String {
