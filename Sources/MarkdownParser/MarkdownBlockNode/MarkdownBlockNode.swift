@@ -2,6 +2,7 @@ import Foundation
 
 public enum MarkdownBlockNode: Hashable, Equatable, Codable {
     case blockquote(children: [MarkdownBlockNode])
+    case callout(kind: CalloutKind, children: [MarkdownBlockNode])
     case bulletedList(isTight: Bool, items: [RawListItem])
     case numberedList(isTight: Bool, start: Int, items: [RawListItem])
     case taskList(isTight: Bool, items: [RawTaskListItem])
@@ -12,6 +13,53 @@ public enum MarkdownBlockNode: Hashable, Equatable, Codable {
     case table(columnAlignments: [RawTableColumnAlignment], rows: [RawTableRow])
     case thematicBreak
 }
+
+/// GitHub-style alert/callout kinds (`> [!NOTE]`, `> [!WARNING]`, etc.).
+public enum CalloutKind: String, Hashable, Equatable, Codable, Sendable {
+    case note
+    case tip
+    case important
+    case warning
+    case caution
+
+    /// Parses the bracketed marker text (case-insensitive), e.g. "[!NOTE]".
+    public init?(marker: String) {
+        let trimmed = marker.trimmingCharacters(in: .whitespaces).lowercased()
+        guard trimmed.hasPrefix("[!"), trimmed.hasSuffix("]") else { return nil }
+        let inner = String(trimmed.dropFirst(2).dropLast())
+        switch inner {
+        case "note": self = .note
+        case "tip": self = .tip
+        case "important": self = .important
+        case "warning": self = .warning
+        case "caution": self = .caution
+        default: return nil
+        }
+    }
+
+    /// SF Symbol name for the callout icon.
+    public var systemImageName: String {
+        switch self {
+        case .note: "info.circle.fill"
+        case .tip: "lightbulb.fill"
+        case .important: "exclamationmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .caution: "exclamationmark.octagon.fill"
+        }
+    }
+
+    /// Display title shown at the top of the callout.
+    public var title: String {
+        switch self {
+        case .note: "Note"
+        case .tip: "Tip"
+        case .important: "Important"
+        case .warning: "Warning"
+        case .caution: "Caution"
+        }
+    }
+}
+
 
 public extension MarkdownBlockNode {
     var children: [MarkdownBlockNode] {

@@ -142,8 +142,15 @@ private extension MarkdownParser.SpecializeContext {
     func processNode(_ node: MarkdownBlockNode) {
         switch node {
         case let .blockquote(children):
-            let flattenedChildren = flattenBlockquoteChildren(children)
-            context.append(.blockquote(children: flattenedChildren))
+            // Detect GitHub-style callouts: a blockquote whose first paragraph
+            // begins with a `[!TYPE]` marker line.
+            if let (kind, strippedChildren) = detectCallout(children) {
+                let flattened = flattenBlockquoteChildren(strippedChildren)
+                context.append(.callout(kind: kind, children: flattened))
+            } else {
+                let flattenedChildren = flattenBlockquoteChildren(children)
+                context.append(.blockquote(children: flattenedChildren))
+            }
         case .bulletedList:
             let nodes = processNodeInsideListEnvironment(node)
             context.append(contentsOf: nodes)
@@ -161,9 +168,53 @@ private extension MarkdownParser.SpecializeContext {
             context.append(.heading(level: level, content: content))
         case let .table(columnAlignments, rows):
             context.append(.table(columnAlignments: columnAlignments, rows: rows))
+        case let .callout(kind, children):
+            // A callout that arrives here directly (rare) is preserved as-is.
+            context.append(.callout(kind: kind, children: children))
         case .thematicBreak:
             context.append(.thematicBreak)
         }
+    }
+
+    /// Detects a GitHub-style callout marker (`[!NOTE]`, `[!WARNING]`, …) at the
+    /// start of a blockquote's first paragraph. Returns the callout kind plus
+    /// the children with the marker line removed, or nil if not a callout.
+    func detectCallout(
+        _ children: [MarkdownBlockNode]
+    ) -> (CalloutKind, [MarkdownBlockNode])? {
+        guard let first = children.first,
+              case let .paragraph(content) = first,
+              case let .text(firstText)? = content.first
+        else { return nil }
+
+        // The marker must be on its own line at the very start, e.g. "[!NOTE]\n…"
+        // cmark keeps the marker + following soft break inside the same paragraph.
+        let lines = firstText.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let markerLine = lines.first,
+              let kind = CalloutKind(marker: String(markerLine))
+        else { return nil }
+
+        // Rebuild the first paragraph without the marker line.
+        var newFirstContent = content
+        let remainder = lines.count > 1 ? String(lines[1]) : ""
+        if remainder.isEmpty {
+            // Marker consumed the whole first text node — drop it. If that leaves
+            // the paragraph's remaining inlines starting with a soft break, drop it.
+            newFirstContent.removeFirst()
+            if case .softBreak = newFirstContent.first {
+                newFirstContent.removeFirst()
+            }
+        } else {
+            newFirstContent[0] = .text(remainder)
+        }
+
+        var newChildren = children
+        if newFirstContent.isEmpty {
+            newChildren.removeFirst()
+        } else {
+            newChildren[0] = .paragraph(content: newFirstContent)
+        }
+        return (kind, newChildren)
     }
 
     func flattenBlockquoteChildren(_ children: [MarkdownBlockNode]) -> [MarkdownBlockNode] {
@@ -178,6 +229,8 @@ private extension MarkdownParser.SpecializeContext {
             case let .codeBlock(_, content):
                 flattenedChildren.append(.paragraph(content: [.text(content)]))
             case let .blockquote(nestedChildren):
+                flattenedChildren.append(contentsOf: flattenBlockquoteChildren(nestedChildren))
+            case let .callout(_, nestedChildren):
                 flattenedChildren.append(contentsOf: flattenBlockquoteChildren(nestedChildren))
             case let .bulletedList(_, items):
                 flattenedChildren.append(contentsOf: extractParagraphs(from: items))

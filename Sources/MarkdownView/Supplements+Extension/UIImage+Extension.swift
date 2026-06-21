@@ -5,7 +5,7 @@
 //  Created by 秋星桥 on 8/1/25.
 //
 
-    import UIKit
+import UIKit
 
     extension UIImage {
         func resized(to size: CGSize) -> UIImage {

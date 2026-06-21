@@ -5,7 +5,7 @@
 
 import Litext
 
-    import UIKit
+import UIKit
 
     public final class CodeView: UIView {
         // MARK: - CONTENT

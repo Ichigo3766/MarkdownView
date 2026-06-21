@@ -6,7 +6,7 @@
 import CoreText
 import Litext
 import MarkdownParser
-    import UIKit
+import UIKit
 
 // MARK: - ListProcessor
 
@@ -175,7 +175,9 @@ extension ListProcessor {
                     case let .taskList(_, sublist):
                         result.append(contentsOf: flatList(.task(sublist), currentDepth: currentDepth + 1))
                     default:
+                        #if DEBUG
                         print("WARNING: Unhandled list item: \(child)")
+                        #endif
                     }
                 }
             }

@@ -172,7 +172,15 @@ extension TextBuilder {
                     width: 4,
                     height: quotingLineHeight
                 )
-                context.setFillColor(theme.colors.body.withAlphaComponent(0.1).cgColor)
+                // Use the callout accent color for the side bar when present,
+                // otherwise fall back to the default subtle blockquote bar.
+                var barColor = theme.colors.body.withAlphaComponent(0.1)
+                if let firstRun = line.glyphRuns().first,
+                   let attrs = CTRunGetAttributes(firstRun) as? [NSAttributedString.Key: Any],
+                   let accent = attrs[.calloutAccentColor] as? PlatformColor {
+                    barColor = accent
+                }
+                context.setFillColor(barColor.cgColor)
                 let roundedPath = CGPath(roundedRect: lineRect, cornerWidth: 2, cornerHeight: 2, transform: nil)
                 context.addPath(roundedPath)
                 context.fillPath()
@@ -339,7 +347,15 @@ extension TextBuilder {
                     width: 4,
                     height: quotingLineHeight
                 )
-                context.setFillColor(theme.colors.body.withAlphaComponent(0.1).cgColor)
+                // Use the callout accent color for the side bar when present,
+                // otherwise fall back to the default subtle blockquote bar.
+                var barColor = theme.colors.body.withAlphaComponent(0.1)
+                if let firstRun = line.glyphRuns().first,
+                   let attrs = CTRunGetAttributes(firstRun) as? [NSAttributedString.Key: Any],
+                   let accent = attrs[.calloutAccentColor] as? PlatformColor {
+                    barColor = accent
+                }
+                context.setFillColor(barColor.cgColor)
                 let roundedPath = CGPath(roundedRect: lineRect, cornerWidth: 2, cornerHeight: 2, transform: nil)
                 context.addPath(roundedPath)
                 context.fillPath()

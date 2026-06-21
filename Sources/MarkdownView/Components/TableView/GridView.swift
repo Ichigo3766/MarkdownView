@@ -6,7 +6,7 @@
 //  Copyright (c) 2025 ktiays. All rights reserved.
 //
 
-    import UIKit
+import UIKit
 
     final class GridView: UIView {
         private var widths: [CGFloat] = []

@@ -5,7 +5,7 @@
 
 import Litext
 
-    import UIKit
+import UIKit
 
     final class LineNumberView: UIView {
         var lineCount: Int = 1 {

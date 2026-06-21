@@ -52,6 +52,8 @@ public extension MarkdownBlockNode {
         switch self {
         case let .blockquote(children):
             try [.blockquote(children: children.rewrite(r))]
+        case let .callout(kind, children):
+            try [.callout(kind: kind, children: children.rewrite(r))]
         case let .bulletedList(isTight, items):
             try [
                 .bulletedList(

@@ -6,7 +6,7 @@
 import CoreText
 import Litext
 import MarkdownParser
-    import UIKit
+import UIKit
 
 @MainActor final class TextBuilder {
     private let nodes: [MarkdownBlockNode]
@@ -161,6 +161,8 @@ extension TextBuilder {
             return result.0
         case let .blockquote(children):
             return blockProcessor.processBlockquote(children)
+        case let .callout(kind, children):
+            return blockProcessor.processCallout(kind: kind, children: children)
         case let .table(_, rows):
             let result = blockProcessor.processTable(rows: rows)
             subviews.append(result.1)

@@ -49,7 +49,7 @@ extension MarkdownInlineNode {
                 .font: theme.fonts.body,
                 .foregroundColor: theme.colors.body,
             ])
-        case let .code(string), let .html(string):
+        case let .code(string):
             let controlAttributes: [NSAttributedString.Key: Any] = [
                 .font: theme.fonts.codeInline,
                 .backgroundColor: theme.colors.codeBackground.withAlphaComponent(0.05),
@@ -57,6 +57,13 @@ extension MarkdownInlineNode {
             let text = NSMutableAttributedString(string: string, attributes: [.foregroundColor: theme.colors.code])
             text.addAttributes(controlAttributes, range: .init(location: 0, length: text.length))
             return text
+        case let .html(string):
+            // Inline raw HTML. Models commonly emit a handful of formatting tags.
+            // Recognized standalone tags are converted to their visual equivalent;
+            // recognized open/close tags are dropped (their wrapped text arrives as
+            // separate .text siblings and renders normally); anything else falls
+            // back to monospace so it's at least visible.
+            return Self.renderInlineHTML(string, theme: theme)
         case let .emphasis(children):
             let ans = NSMutableAttributedString()
             children.map { $0.render(theme: theme, context: context, viewProvider: viewProvider) }.forEach { ans.append($0) }
@@ -197,5 +204,53 @@ extension MarkdownInlineNode {
                 )
             }
         }
+    }
+
+    /// Renders an inline raw-HTML fragment that cmark emits as a single `.html`
+    /// node. Common model-emitted formatting tags are handled gracefully:
+    ///   - `<br>` / `<br/>`        → hard line break
+    ///   - opening/closing tags of `<sub> <sup> <kbd> <mark> <u> <b> <strong>
+    ///     <i> <em> <s> <del> <ins> <code>` → dropped (the wrapped text arrives
+    ///     as adjacent `.text` nodes and renders as normal body text)
+    ///   - everything else → shown as monospace so it remains visible
+    @MainActor
+    static func renderInlineHTML(_ raw: String, theme: MarkdownTheme) -> NSAttributedString {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        let lower = trimmed.lowercased()
+
+        // Line break tags.
+        if lower == "<br>" || lower == "<br/>" || lower == "<br />" {
+            return NSAttributedString(string: "\n", attributes: [
+                .font: theme.fonts.body,
+                .foregroundColor: theme.colors.body,
+            ])
+        }
+
+        // Recognized formatting open/close tags → emit nothing. The wrapped
+        // text content is delivered by cmark as separate sibling text nodes.
+        let knownTags = [
+            "sub", "sup", "kbd", "mark", "u", "b", "strong",
+            "i", "em", "s", "del", "ins", "code", "span", "small",
+        ]
+        for tag in knownTags {
+            if lower == "<\(tag)>" || lower == "</\(tag)>" {
+                return NSAttributedString(string: "")
+            }
+            // Opening tag with attributes, e.g. <span style="...">
+            if lower.hasPrefix("<\(tag) ") && lower.hasSuffix(">") {
+                return NSAttributedString(string: "")
+            }
+        }
+
+        // HTML comments → drop.
+        if lower.hasPrefix("<!--") {
+            return NSAttributedString(string: "")
+        }
+
+        // Unknown HTML → keep visible as monospace so nothing silently vanishes.
+        return NSAttributedString(string: raw, attributes: [
+            .font: theme.fonts.codeInline,
+            .foregroundColor: theme.colors.code,
+        ])
     }
 }

@@ -7,6 +7,7 @@
 
 import Foundation
 import Litext
+import MarkdownParser
 import UIKit
 
 public extension MarkdownTheme {
@@ -165,5 +166,16 @@ public extension MarkdownTheme {
         default: scale = 1.0
         }
         return UIFont.systemFont(ofSize: bodySize * scale, weight: .bold)
+    }
+
+    /// Accent color for a GitHub-style callout/alert kind.
+    func calloutColor(for kind: CalloutKind) -> UIColor {
+        switch kind {
+        case .note: return .systemBlue
+        case .tip: return .systemGreen
+        case .important: return .systemPurple
+        case .warning: return .systemOrange
+        case .caution: return .systemRed
+        }
     }
 }

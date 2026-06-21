@@ -8,7 +8,15 @@ let package = Package(
     defaultLocalization: "en",
     platforms: [
         .iOS(.v16),
+        .macCatalyst(.v16),
+        // NOTE: The library is iOS / iPadOS only (pure UIKit, no AppKit code).
+        // The `.macOS` entry exists ONLY so SwiftPM can resolve the UIKit-based
+        // dependencies (Litext, SwiftMath, Highlighter, LRUCache) which declare
+        // a macOS 12 floor. The package is never built/run on native macOS.
+        .macOS(.v13),
     ],
+
+
     products: [
         .library(name: "MarkdownView", targets: ["MarkdownView"]),
         .library(name: "MarkdownParser", targets: ["MarkdownParser"]),

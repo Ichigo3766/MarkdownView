@@ -169,6 +169,93 @@ import UIKit
         return result
     }
 
+    func processCallout(kind: CalloutKind, children: [MarkdownBlockNode]) -> NSAttributedString {
+        let accent = theme.calloutColor(for: kind)
+
+        let result = NSMutableAttributedString()
+
+        let baseParagraphStyle = NSMutableParagraphStyle()
+        baseParagraphStyle.firstLineHeadIndent = theme.spacings.blockquoteIndent
+        baseParagraphStyle.headIndent = theme.spacings.blockquoteIndent
+        baseParagraphStyle.tailIndent = -4
+        baseParagraphStyle.paragraphSpacing = theme.spacings.blockquoteSpacing
+        baseParagraphStyle.lineSpacing = theme.spacings.lineSpacing
+
+        // ── Title line: colored icon glyph + bold colored title ──────────
+        let titleParagraph = NSMutableParagraphStyle()
+        titleParagraph.firstLineHeadIndent = theme.spacings.blockquoteIndent
+        titleParagraph.headIndent = theme.spacings.blockquoteIndent
+        titleParagraph.tailIndent = -4
+        titleParagraph.paragraphSpacing = theme.spacings.blockquoteSpacing
+        titleParagraph.lineSpacing = theme.spacings.lineSpacing
+
+        // SF Symbol icon rendered as a text attachment so it sits inline.
+        let titleLine = NSMutableAttributedString()
+        if let iconImage = UIImage(systemName: kind.systemImageName)?
+            .withTintColor(accent, renderingMode: .alwaysOriginal)
+        {
+            let attachment = NSTextAttachment()
+            attachment.image = iconImage
+            let fontSize = theme.fonts.body.pointSize
+            attachment.bounds = CGRect(x: 0, y: -1, width: fontSize, height: fontSize)
+            titleLine.append(NSAttributedString(attachment: attachment))
+            titleLine.append(NSAttributedString(string: "  "))
+        }
+        titleLine.append(NSAttributedString(
+            string: kind.title,
+            attributes: [
+                .font: UIFont.systemFont(ofSize: theme.fonts.body.pointSize, weight: .semibold),
+                .foregroundColor: accent,
+            ]
+        ))
+        titleLine.append(NSAttributedString(string: "\n"))
+        titleLine.addAttribute(.paragraphStyle, value: titleParagraph, range: NSRange(location: 0, length: titleLine.length))
+        result.append(titleLine)
+
+        // ── Body paragraphs ──────────────────────────────────────────────
+        for child in children {
+            guard case let .paragraph(content) = child else {
+                continue
+            }
+            let paragraphContent = content.render(theme: theme, context: context, viewProvider: viewProvider)
+            paragraphContent.addAttribute(
+                .paragraphStyle,
+                value: baseParagraphStyle,
+                range: NSRange(location: 0, length: paragraphContent.length)
+            )
+            result.append(paragraphContent)
+        }
+
+        while result.string.hasSuffix("\n") {
+            result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1))
+        }
+        guard result.length > 0 else { return result }
+
+        // ── Colored side bar via the blockquote drawing callbacks ────────
+        let marker = blockquoteMarking!
+        let drawer = blockquoteDrawing!
+
+        result.insert(buildWithParagraphSync(withNewLine: false) { paragraph in
+            paragraph = baseParagraphStyle
+        } content: {
+            .init(string: LTXReplacementText, attributes: [
+                .font: theme.fonts.body,
+                .paragraphStyle: baseParagraphStyle,
+                .calloutAccentColor: accent,
+                .ltxLineDrawingCallback: LTXLineDrawingAction { marker($0, $1, $2) },
+            ])
+        }, at: 0)
+        result.append(buildWithParagraphSync(withNewLine: true) {
+            .init(string: LTXReplacementText, attributes: [
+                .font: theme.fonts.body,
+                .calloutAccentColor: accent,
+                .ltxLineDrawingCallback: LTXLineDrawingAction { drawer($0, $1, $2) },
+            ])
+        })
+
+        return result
+    }
+
     func processTable(rows: [RawTableRow]) -> (NSAttributedString, TableView) {
         let tableView = viewProvider.acquireTableView()
         let contents = rows.map {

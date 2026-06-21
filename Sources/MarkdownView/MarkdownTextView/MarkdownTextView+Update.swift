@@ -54,11 +54,11 @@ extension MarkdownTextView {
 
         // ── Manage the view pool ──────────────────────────────────────────
         // Only stash views that belong to DIRTY (changed/removed) blocks.
+        // The clean prefix's views never change, so they're never removed —
+        // we only need to track the dirty-old views for cleanup, not the whole
+        // contextViews set (avoids two O(n_views) Set allocations per frame).
         viewProvider.lockPool()
         defer { viewProvider.unlockPool() }
-
-        // Collect the full set of old views for cleanup tracking
-        let oldContextViewsSet = Set(contextViews)
 
         // Stash only the views from segments that are being replaced
         let dirtyOldSegments = cachedBlocks.dropFirst(firstDirtyIndex)
@@ -115,9 +115,14 @@ extension MarkdownTextView {
         }
 
         // ── Remove views that are no longer in use ────────────────────────
-        let currentViewsSet = Set(contextViews)
-        for goneView in oldContextViewsSet where !currentViewsSet.contains(goneView) {
-            goneView.removeFromSuperview()
+        // Only the dirty-old views could have been removed (clean-prefix views
+        // are always retained). A dirty-old view that isn't present in the new
+        // segments' views is gone → remove from superview.
+        if !dirtyOldViews.isEmpty {
+            let newViewsSet = Set(newSegments.flatMap(\.subviews))
+            for goneView in dirtyOldViews where !newViewsSet.contains(goneView) {
+                goneView.removeFromSuperview()
+            }
         }
 
         textView.setNeedsLayout()

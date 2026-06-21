@@ -5,7 +5,7 @@
 //  Created by 秋星桥 on 2025/1/3.
 //
 
-    import UIKit
+import UIKit
 
     public extension UIFont {
         var bold: UIFont {

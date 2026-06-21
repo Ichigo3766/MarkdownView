@@ -12,4 +12,6 @@ extension NSAttributedString.Key {
     static let contextImage: NSAttributedString.Key = .init("contextImage")
     static let contextIdentifier: NSAttributedString.Key = .init("contextIdentifier")
     static let mathLatexContent: NSAttributedString.Key = .init("mathLatexContent")
+    /// Accent color for a callout's side bar (set on the marking/drawing runs).
+    static let calloutAccentColor: NSAttributedString.Key = .init("calloutAccentColor")
 }

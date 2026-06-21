@@ -7,7 +7,7 @@
 
 import Foundation
 import MarkdownParser
-    import UIKit
+import UIKit
 
 public extension MarkdownTheme {
     /// The Highlightr theme name to use for code highlighting

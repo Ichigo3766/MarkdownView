@@ -16,16 +16,38 @@ public enum MathRenderer {
 
     private static func preprocessLatex(_ latex: String) -> String {
         latex
+            // Ellipses & logic operators SwiftMath doesn't define.
             .replacingOccurrences(of: "\\dots", with: "\\ldots")
             .replacingOccurrences(of: "\\implies", with: "\\Rightarrow")
+            .replacingOccurrences(of: "\\impliedby", with: "\\Leftarrow")
             .replacingOccurrences(of: "\\iff", with: "\\Leftrightarrow")
+            .replacingOccurrences(of: "\\to", with: "\\rightarrow")
+            .replacingOccurrences(of: "\\gets", with: "\\leftarrow")
+            // Environments SwiftMath maps to its supported equivalents.
             .replacingOccurrences(of: "\\begin{align}", with: "\\begin{aligned}")
             .replacingOccurrences(of: "\\end{align}", with: "\\end{aligned}")
             .replacingOccurrences(of: "\\begin{align*}", with: "\\begin{aligned}")
             .replacingOccurrences(of: "\\end{align*}", with: "\\end{aligned}")
+            .replacingOccurrences(of: "\\begin{equation}", with: "")
+            .replacingOccurrences(of: "\\end{equation}", with: "")
+            .replacingOccurrences(of: "\\begin{equation*}", with: "")
+            .replacingOccurrences(of: "\\end{equation*}", with: "")
+            .replacingOccurrences(of: "\\begin{gather}", with: "\\begin{gathered}")
+            .replacingOccurrences(of: "\\end{gather}", with: "\\end{gathered}")
+            .replacingOccurrences(of: "\\begin{gather*}", with: "\\begin{gathered}")
+            .replacingOccurrences(of: "\\end{gather*}", with: "\\end{gathered}")
             .replacingOccurrences(of: "\\begin{cases}", with: "\\left\\{\\begin{matrix}")
             .replacingOccurrences(of: "\\end{cases}", with: "\\end{matrix}\\right.")
+            // Fraction variants → plain \frac.
             .replacingOccurrences(of: "\\dfrac", with: "\\frac")
+            .replacingOccurrences(of: "\\tfrac", with: "\\frac")
+            // Spacing macros SwiftMath ignores/doesn't support.
+            .replacingOccurrences(of: "\\!", with: "")
+            .replacingOccurrences(of: "\\;", with: "\\ ")
+            .replacingOccurrences(of: "\\:", with: "\\ ")
+            .replacingOccurrences(of: "\\,", with: "\\ ")
+            // \tag{...} is meaningless for inline rendering — strip it.
+            .replacingTagCommand()
             .replacingOperatornameCommand()
             .replacingBoxedCommand()
     }
@@ -77,6 +99,32 @@ private extension String {
     func substring(with range: NSRange) -> String? {
         guard let swiftRange = Range(range, in: self) else { return nil }
         return String(self[swiftRange])
+    }
+
+    /// Strips `\tag{...}` (equation numbering) — meaningless for inline rendering.
+    func replacingTagCommand() -> String {
+        var result = self
+        while let range = result.range(of: "\\tag{") {
+            let startIndex = range.upperBound
+            var braceCount = 1
+            var endIndex = startIndex
+
+            while endIndex < result.endIndex, braceCount > 0 {
+                let char = result[endIndex]
+                if char == "{" { braceCount += 1 }
+                else if char == "}" { braceCount -= 1 }
+                if braceCount > 0 { endIndex = result.index(after: endIndex) }
+            }
+
+            if braceCount == 0 {
+                let fullRange = range.lowerBound ... endIndex
+                result.replaceSubrange(fullRange, with: "")
+            } else {
+                result.replaceSubrange(range, with: "")
+                break
+            }
+        }
+        return result
     }
 
     /// Converts \operatorname{foo} → \mathrm{foo} so SwiftMath can render it.

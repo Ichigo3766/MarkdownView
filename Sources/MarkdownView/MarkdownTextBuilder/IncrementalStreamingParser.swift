@@ -21,15 +21,21 @@ import MarkdownParser
 /// On each subsequent tick, only the short "live tail" (from the last block
 /// boundary onward) needs to be re-parsed and merged with the cached result.
 ///
-/// ## Safety
-/// No `String.Index` math is stored between calls. The only persistent state
-/// is `cachedText: String` and `cachedResult`. All boundary detection uses
-/// safe string searching (`range(of:options:range:)`) with no index arithmetic
-/// that could go out of bounds if the text is reset or shortened.
+/// ## Incremental fence scanning
+/// Because the model output is **append-only** during a stream (verified each
+/// tick by `newText.hasPrefix(cachedText)`), the fence/boundary scan does NOT
+/// need to re-read the whole document every tick. We cache:
+///   - the line-by-line scan cursor (offset + `String.Index`) up to the last
+///     processed line boundary,
+///   - the running "inside fence" state and fence-start offset,
+///   - all fenced ranges discovered so far,
+///   - all `\n\n` boundary offsets discovered so far.
+/// Each tick we only scan the freshly-appended suffix → O(delta), not O(n).
 ///
+/// ## Safety
 /// When text is reset (regeneration, new message) — detected by
-/// `!newText.hasPrefix(cachedText)` — the cache is cleared and a normal full
-/// parse runs for that tick. The next tick will already benefit from caching.
+/// `!newText.hasPrefix(cachedText)` — all incremental scan state is cleared and
+/// a fresh scan runs for that tick.
 final class IncrementalStreamingParser {
 
     // MARK: - Cached Stable Prefix
@@ -38,18 +44,42 @@ final class IncrementalStreamingParser {
     /// completed block boundary). Plain `String` — no stored indices.
     private var cachedText: String = ""
 
+    /// Cached character count of `cachedText` to avoid O(n) `.count` each tick.
+    private var cachedTextCount: Int = 0
+
     /// Pre-parsed blocks for `cachedText`.
     private var cachedBlocks: [MarkdownBlockNode] = []
+
+    /// Rendered math images for the stable cached portion. Rendered once (off
+    /// the drain thread) when the stable boundary advances, then reused every
+    /// tick so settled equations appear live during streaming rather than
+    /// snapping in at stream end. The live tail still shows raw LaTeX until it
+    /// settles into the stable prefix.
+    private var cachedRendered: RenderedTextContent.Map = [:]
 
     /// The theme used when building `cachedBlocks`.
     private var cachedTheme: MarkdownTheme = .default
 
+    // MARK: - Incremental Scan State
+
+    /// All text that has been line-scanned so far is `scannedText`. On the next
+    /// tick (append-only), only the suffix after `scannedText` needs scanning.
+    private var scannedText: String = ""
+    /// Character offset where the next unscanned line begins.
+    private var scanCharOffset: Int = 0
+    /// Whether the scan is currently inside an unclosed code fence.
+    private var scanInsideFence: Bool = false
+    /// Character offset of the opening ``` line when `scanInsideFence` is true.
+    private var scanFenceStart: Int = 0
+    /// Fenced (start, end) character ranges discovered so far (closed fences).
+    private var scanFencedRanges: [(Int, Int)] = []
+    /// Character offsets (upper-bound of each "\n\n") discovered so far.
+    private var scanBoundaryOffsets: [Int] = []
+
     // MARK: - Tuning
 
     /// Minimum number of characters that must remain in the "live tail" after
-    /// the stable boundary. A larger value means we cache more aggressively
-    /// (fewer tail re-parses) at the cost of slightly stale block structure
-    /// for the last few lines. 30 chars is roughly 1–2 sentences.
+    /// the stable boundary. 30 chars is roughly 1–2 sentences.
     private static let minTailLength: Int = 30
 
     // MARK: - Public API
@@ -58,15 +88,23 @@ final class IncrementalStreamingParser {
     /// so stale stable-prefix data from the previous message doesn't leak.
     func reset() {
         cachedText = ""
+        cachedTextCount = 0
         cachedBlocks = []
+        cachedRendered = [:]
+        resetScanState()
+    }
+
+    private func resetScanState() {
+        scannedText = ""
+        scanCharOffset = 0
+        scanInsideFence = false
+        scanFenceStart = 0
+        scanFencedRanges.removeAll(keepingCapacity: true)
+        scanBoundaryOffsets.removeAll(keepingCapacity: true)
     }
 
     /// Returns a `PreprocessedContent` for `newText`, reusing as much cached
     /// state as possible.
-    ///
-    /// - Parameters:
-    ///   - newText: The full `displayContent` string for this tick.
-    ///   - theme:   The current `MarkdownTheme`.
     func parse(
         _ newText: String,
         theme: MarkdownTheme
@@ -81,23 +119,17 @@ final class IncrementalStreamingParser {
         // ── 2. Text reset / shrinkage → cache is invalid ──────────────────
         // `hasPrefix` is safe: returns false (never crashes) when lengths differ
         // or content changed. This covers regeneration, stop-and-restart, etc.
-        if !newText.hasPrefix(cachedText) {
+        if !newText.hasPrefix(scannedText) {
             reset()
             cachedTheme = theme
         }
 
-        // ── 3. Find stable boundary in newText ───────────────────────────
-        // We look for the last "\n\n" that leaves at least `minTailLength`
-        // characters after it. Everything up to that boundary is "stable"
-        // (won't change in future ticks unless the model backtracks, which
-        // is caught by step 2 above). Everything from the boundary onward is
-        // the "live tail" that we re-parse each tick.
+        // ── 3. Find stable boundary in newText (incremental) ──────────────
         let stableBoundaryOffset = findStableBoundaryOffset(in: newText)
 
         // ── 4. Build tail text ────────────────────────────────────────────
         let tailText: String
         if stableBoundaryOffset == 0 {
-            // No stable boundary found → entire text is the live tail
             tailText = newText
         } else {
             let boundaryIdx = newText.index(newText.startIndex, offsetBy: stableBoundaryOffset)
@@ -105,153 +137,174 @@ final class IncrementalStreamingParser {
         }
 
         // ── 5. Parse the live tail (always small) ─────────────────────────
-        // Math rendering is skipped during streaming to avoid blocking the
-        // drain loop. Equations will appear as placeholder text while the
-        // stream is active and render properly once streaming finishes and
-        // the non-streaming path takes over.
         let parser = MarkdownParser()
         let tailResult = parser.parse(tailText)
 
         // ── 6. Update stable cache if the boundary advanced ───────────────
-        // Only re-parse and cache the new stable portion when the boundary
-        // has moved forward past what we already have cached.
-        if stableBoundaryOffset > cachedText.count {
+        if stableBoundaryOffset > cachedTextCount {
             let newStableEndIdx = newText.index(newText.startIndex, offsetBy: stableBoundaryOffset)
             let newStableText = String(newText[..<newStableEndIdx])
             let stableResult = parser.parse(newStableText)
             cachedBlocks = stableResult.document
-            // No math render during streaming — keep cachedRendered empty.
             cachedText = newStableText
+            cachedTextCount = stableBoundaryOffset
+
+            // Render the stable portion's math ONCE here (we're already off the
+            // main thread). Reused every subsequent tick → equations in settled
+            // text appear live during streaming instead of snapping in at the end.
+            cachedRendered = Self.renderMath(stableResult.mathContext, theme: theme)
         }
 
         // ── 7. Merge stable + tail ────────────────────────────────────────
         let allBlocks = cachedBlocks + tailResult.document
 
+        // The live tail is re-parsed independently each tick, so its math
+        // replacement identifiers restart at 0 and would COLLIDE with the
+        // stable portion's identifiers in the shared `rendered` map. To stay
+        // correct we only expose the pre-rendered stable math when the tail
+        // contains no equations of its own; otherwise we fall back to raw
+        // LaTeX for this tick (it resolves once the stream settles / finishes).
+        let rendered: RenderedTextContent.Map = tailResult.mathContext.isEmpty ? cachedRendered : [:]
+
         return MarkdownTextView.PreprocessedContent(
             blocks: allBlocks,
-            rendered: [:],
-            highlightMaps: [:]
+            rendered: rendered,
+            highlightMaps: [:],
+            mathContext: [:]
         )
     }
 
-    // MARK: - Private: Boundary Detection
+    /// Synchronously renders a math context to images. Called on the parser's
+    /// background thread (never the main/drain thread).
+    private static func renderMath(
+        _ mathContext: [Int: String],
+        theme: MarkdownTheme
+    ) -> RenderedTextContent.Map {
+        guard !mathContext.isEmpty else { return [:] }
+        var map: RenderedTextContent.Map = [:]
+        for (key, value) in mathContext {
+            let image = MathRenderer.renderToImage(
+                latex: value,
+                fontSize: theme.fonts.body.pointSize,
+                textColor: theme.colors.body
+            )?.withRenderingMode(.alwaysTemplate)
+            let replacementText = MarkdownParser.replacementText(for: .math, identifier: .init(key))
+            map[replacementText] = RenderedTextContent(image: image, text: value)
+        }
+        return map
+    }
 
-    /// Returns the character offset (from `startIndex`) of the start of the
-    /// live tail — i.e., the position right after the last `\n\n` that leaves
-    /// at least `minTailLength` characters remaining.
+    // MARK: - Private: Incremental Boundary Detection
+
+    /// Returns the character offset of the start of the live tail — i.e., the
+    /// position right after the last `\n\n` outside a code fence that leaves at
+    /// least `minTailLength` characters remaining.
     ///
-    /// Only `\n\n` occurrences that fall **outside** a fenced code block are
-    /// considered valid split points. Splitting inside a code fence would cause
-    /// the cached prefix to contain an unclosed ``` block and the live tail to
-    /// start mid-block, producing a "double code block" visual artifact during
-    /// streaming.
-    ///
-    /// **Critical optimisation for large code blocks:**
-    /// If the text ends inside an unclosed fence (i.e. `insideFence == true`
-    /// after the scan), the stable boundary is clamped to the last qualifying
-    /// `\n\n` that appears *before* the opening fence.  Without this clamp the
-    /// entire fence would be the "live tail" and would be re-parsed on every
-    /// drain tick — O(n²) total for a 1 000-line code block.
-    ///
-    /// Note: `StreamingMarkdownView.resolveStreamingCodeBlock` is the primary
-    /// guard that intercepts unclosed fences and routes them to
-    /// `StreamingCodeBlockView` (bypassing this parser entirely).  This clamp
-    /// is defence-in-depth for any code path that still sends fenced content
-    /// through the incremental parser.
-    ///
-    /// Returns `0` if no qualifying boundary exists (entire text is the tail).
+    /// Incrementally scans only the suffix appended since the previous call.
     private func findStableBoundaryOffset(in text: String) -> Int {
-        let minTail = Self.minTailLength
-        let totalCount = text.count
+        // ── Scan only the freshly-appended suffix ────────────────────────
+        // `scannedText` is always a prefix of `text` (guaranteed by the
+        // hasPrefix reset in parse()). We continue line scanning from
+        // `scanCharOffset`.
+        scanNewSuffix(in: text)
 
-        // Need at least (minTail + 2) characters for any boundary to exist
+        let totalCount = scanCharOffset  // characters scanned so far == text.count
+        let minTail = Self.minTailLength
         guard totalCount > minTail + 2 else { return 0 }
 
-        // ── Build a set of character offsets that are inside a code fence ──
-        // We scan for ``` markers line-by-line (O(n), done once).
-        // A line starting with ``` toggles the "inside fence" state.
-        var insideFence = false
-        // Stores (start, end) byte offsets of fenced regions so we can test
-        // candidate \n\n positions cheaply.  We use Int offsets (not String.Index)
-        // to avoid any index arithmetic pitfalls.
-        var fencedRanges: [(Int, Int)] = []
-        var fenceStart = 0
-        var charOffset = 0
+        // When the text ends inside an unclosed fence, constrain candidate
+        // boundaries to positions before that open fence's start.
+        let openFenceSearchCap = scanInsideFence ? scanFenceStart : totalCount
+        let searchEndOffset = min(totalCount - minTail, openFenceSearchCap)
+        guard searchEndOffset > 0 else { return 0 }
 
-        var lineStart = text.startIndex
+        // Walk cached \n\n boundary offsets backwards, returning the last one
+        // that qualifies (before searchEndOffset and outside any fence).
+        for offset in scanBoundaryOffsets.reversed() {
+            guard offset <= searchEndOffset else { continue }
+            if !isInsideFence(offset) {
+                return offset
+            }
+        }
+        return 0
+    }
+
+    /// Continues the line-by-line scan from `scanCharOffset` over the newly
+    /// appended suffix of `text`, updating fence state + boundary offsets.
+    private func scanNewSuffix(in text: String) {
+        // Resume at the stored char offset. We re-derive the String.Index from
+        // the offset once (O(scanCharOffset)) only when the scan first resumes;
+        // subsequent line walks advance the index directly.
+        guard scanCharOffset <= text.count else {
+            // Defensive: shouldn't happen given the hasPrefix guard.
+            resetScanState()
+            return
+        }
+
+        var lineStart = text.index(text.startIndex, offsetBy: scanCharOffset)
+        var charOffset = scanCharOffset
+
         while lineStart < text.endIndex {
-            // Find end of current line
             let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
-            let lineOffsetStart = charOffset
-            let lineLen = text.distance(from: lineStart, to: lineEnd)
 
-            // Check if this line starts with ```
+            // Only process a line once it is complete (terminated by \n) OR we
+            // are at end-of-text. A line still mid-arrival (no \n yet and at
+            // endIndex) is the live tail — we still account for fence toggling
+            // but do not advance the persisted cursor past it so the next tick
+            // re-reads it cleanly.
+            let lineComplete = (lineEnd != text.endIndex)
+
+            // Stop at the incomplete trailing line WITHOUT mutating any
+            // persisted fence/boundary state. That partial line is the live
+            // tail and will be re-scanned (complete) on a future tick. This
+            // keeps the cached scan state derived only from complete lines.
+            if !lineComplete {
+                break
+            }
+
+            let lineLen = text.distance(from: lineStart, to: lineEnd)
+            let lineOffsetStart = charOffset
+
             let linePrefix = text[lineStart..<lineEnd]
             if linePrefix.hasPrefix("```") {
-                if insideFence {
-                    // Closing fence — record the fenced region up to and
-                    // including this closing ``` line.
+                if scanInsideFence {
                     let fenceEnd = lineOffsetStart + lineLen
-                    fencedRanges.append((fenceStart, fenceEnd))
-                    insideFence = false
+                    scanFencedRanges.append((scanFenceStart, fenceEnd))
+                    scanInsideFence = false
                 } else {
-                    // Opening fence
-                    fenceStart = lineOffsetStart
-                    insideFence = true
+                    scanFenceStart = lineOffsetStart
+                    scanInsideFence = true
                 }
             }
 
-            charOffset += lineLen + 1  // +1 for the \n
-            if lineEnd == text.endIndex { break }
+            // Empty complete line → "\n\n" boundary. Upper bound = offset just
+            // after this line's \n.
+            if lineLen == 0 {
+                scanBoundaryOffsets.append(lineOffsetStart + 1)
+            }
+
+            charOffset += lineLen + 1
             lineStart = text.index(after: lineEnd)
         }
 
-        // If we are currently inside an open (unclosed) fence, treat
-        // everything from fenceStart to end-of-text as fenced.
-        if insideFence {
-            fencedRanges.append((fenceStart, totalCount))
-        }
-
-        /// Returns true if `offset` (character index from startIndex) falls
-        /// inside any fenced region.
-        func isInsideFence(_ offset: Int) -> Bool {
-            fencedRanges.contains { offset >= $0.0 && offset <= $0.1 }
-        }
-
-        // ── Walk \n\n positions backwards, skipping those inside a fence ──
-        //
-        // When the text ends inside an unclosed fence we further constrain the
-        // search to positions *before* that open fence's start offset.  This
-        // prevents the entire growing code block from becoming the live tail.
-        let openFenceSearchCap: Int
-        if insideFence {
-            // fenceStart is the char offset of the ``` opening line.
-            // We only accept \n\n boundaries that come before it.
-            openFenceSearchCap = fenceStart
+        // Persist the cursor up to the last COMPLETE line boundary only.
+        // The incomplete trailing line (if any) is re-scanned next tick.
+        scanCharOffset = charOffset
+        // scannedText tracks the prefix we've consumed for hasPrefix checks.
+        if charOffset >= text.count {
+            scannedText = text
         } else {
-            openFenceSearchCap = totalCount
+            scannedText = String(text[..<text.index(text.startIndex, offsetBy: charOffset)])
         }
+    }
 
-        let searchEndOffset = min(totalCount - minTail, openFenceSearchCap)
-        guard searchEndOffset > 0 else { return 0 }
-        let searchEndIdx = text.index(text.startIndex, offsetBy: searchEndOffset)
-        let searchRange = text.startIndex ..< searchEndIdx
-
-        // Collect all \n\n positions in the search range, then iterate
-        // backwards to find the last one that is outside a code fence.
-        var candidateOffset: Int? = nil
-        var searchCursor = searchRange.lowerBound
-
-        while let found = text.range(of: "\n\n", range: searchCursor..<searchRange.upperBound) {
-            let foundOffset = text.distance(from: text.startIndex, to: found.upperBound)
-            if !isInsideFence(foundOffset) {
-                candidateOffset = foundOffset  // keep updating — last valid one wins
-            }
-            // Advance past this match
-            guard found.upperBound < text.endIndex else { break }
-            searchCursor = found.upperBound
+    /// Returns true if `offset` falls inside any closed fenced region, or after
+    /// the start of an open (unclosed) fence.
+    private func isInsideFence(_ offset: Int) -> Bool {
+        if scanInsideFence, offset >= scanFenceStart { return true }
+        for range in scanFencedRanges where offset >= range.0 && offset <= range.1 {
+            return true
         }
-
-        return candidateOffset ?? 0
+        return false
     }
 }

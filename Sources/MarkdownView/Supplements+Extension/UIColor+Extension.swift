@@ -5,7 +5,7 @@
 //  Created by 秋星桥 on 2025/1/7.
 //
 
-    import UIKit
+import UIKit
 
     extension UIColor {
         convenience init(light: UIColor, dark: UIColor) {

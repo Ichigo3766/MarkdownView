@@ -147,6 +147,8 @@ extension MarkdownParser {
         switch node {
         case let .blockquote(children):
             return [.blockquote(children: finalizeMathBlocks(children, mathContext: mathContext))]
+        case let .callout(kind, children):
+            return [.callout(kind: kind, children: finalizeMathBlocks(children, mathContext: mathContext))]
         case let .bulletedList(isTight, items):
             let processedItems = items.map { item in
                 RawListItem(children: finalizeMathBlocks(item.children, mathContext: mathContext))

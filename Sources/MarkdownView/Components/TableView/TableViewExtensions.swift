@@ -7,7 +7,7 @@
 //
 
 import Litext
-    import UIKit
+import UIKit
 
 // MARK: - LTXAttributeStringRepresentable Extension
 

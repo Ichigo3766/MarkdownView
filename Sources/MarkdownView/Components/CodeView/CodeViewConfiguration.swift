@@ -5,7 +5,7 @@
 
 import Litext
 
-    import UIKit
+import UIKit
 
 enum CodeViewConfiguration {
     static let barPadding: CGFloat = 8

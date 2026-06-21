@@ -7,7 +7,7 @@
 
 import Litext
 
-    import UIKit
+import UIKit
 
 public struct RenderedTextContent {
     public let image: PlatformImage?

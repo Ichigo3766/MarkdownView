@@ -8,7 +8,7 @@
 
 import Litext
 
-    import UIKit
+import UIKit
 
     @MainActor
     final class TableViewCellManager {
