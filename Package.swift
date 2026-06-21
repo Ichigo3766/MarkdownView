@@ -8,9 +8,6 @@ let package = Package(
     defaultLocalization: "en",
     platforms: [
         .iOS(.v16),
-        .macCatalyst(.v16),
-        .macOS(.v13),
-        .visionOS(.v1),
     ],
     products: [
         .library(name: "MarkdownView", targets: ["MarkdownView"]),

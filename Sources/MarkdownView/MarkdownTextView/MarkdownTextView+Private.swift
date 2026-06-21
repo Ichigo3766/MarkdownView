@@ -17,16 +17,9 @@ extension MarkdownTextView {
 
     func setupCombine() {
         resetCombine()
-        if let throttleInterval {
-            contentSubject
-                .throttle(for: .seconds(throttleInterval), scheduler: DispatchQueue.main, latest: true)
-                .sink { [weak self] content in self?.use(content) }
-                .store(in: &cancellables)
-        } else {
-            contentSubject
-                .sink { [weak self] content in self?.use(content) }
-                .store(in: &cancellables)
-        }
+        contentSubject
+            .sink { [weak self] content in self?.use(content) }
+            .store(in: &cancellables)
     }
 
     func use(_ content: PreprocessedContent) {
@@ -47,21 +40,12 @@ extension MarkdownTextView {
 
         // MEMORY FIX: After updateTextExecute() bakes the AST and math images
         // into the NSAttributedString, the PreprocessedContent's heavyweight data
-        // (MarkdownBlockNode tree, rendered math UIImages, highlight maps) is no
-        // longer needed. Replace with an empty instance to free that memory.
-        // For a message with code blocks + math, this saves ~2-10MB per message.
-        // The coordinator's lastText/lastPreprocessedContent handles diffing,
-        // so clearing `document` here is safe.
-        // NOTE: We do NOT clear cachedBlockSegments here — the cache holds its
-        // own copies of MarkdownBlockNode and NSAttributedString, and must persist
-        // across streaming updates to enable incremental rendering.
+        // is no longer needed. Replace with an empty instance to free that memory.
         document = PreprocessedContent()
 
         // Do NOT call layoutIfNeeded() here.
-        // updateTextExecute() already called setNeedsLayout() / needsLayout = true,
-        // which schedules layout for the next run-loop pass. Calling layoutIfNeeded()
-        // synchronously would force a full O(n) layout of the entire growing attributed
-        // string on EVERY streaming token — the main cause of the smoothness drop.
-        // The run-loop will batch and coalesce layout passes automatically.
+        // updateTextExecute() already called setNeedsLayout(), which schedules
+        // layout for the next run-loop pass. The run-loop will batch and coalesce
+        // layout passes automatically.
     }
 }

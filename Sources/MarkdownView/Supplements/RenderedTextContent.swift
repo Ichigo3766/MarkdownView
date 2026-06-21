@@ -7,11 +7,7 @@
 
 import Litext
 
-#if canImport(UIKit)
     import UIKit
-#elseif canImport(AppKit)
-    import AppKit
-#endif
 
 public struct RenderedTextContent {
     public let image: PlatformImage?

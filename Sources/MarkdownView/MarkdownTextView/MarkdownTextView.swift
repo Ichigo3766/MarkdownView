@@ -7,248 +7,122 @@ import Combine
 import CoreText
 import Litext
 import MarkdownParser
+import UIKit
 
-#if canImport(UIKit)
-    import UIKit
+public final class MarkdownTextView: UIView {
+    public var linkHandler: ((LinkPayload, NSRange, CGPoint) -> Void)?
+    public var codePreviewHandler: ((String?, NSAttributedString) -> Void)?
 
-    public final class MarkdownTextView: UIView {
-        public var linkHandler: ((LinkPayload, NSRange, CGPoint) -> Void)?
-        public var codePreviewHandler: ((String?, NSAttributedString) -> Void)?
-
-        public internal(set) var document: PreprocessedContent = .init()
-        public let textView: LTXLabel = .init()
-        public var theme: MarkdownTheme = .default {
-            didSet {
-                textView.selectionBackgroundColor = theme.colors.selectionBackground
-                // Theme change invalidates all cached block renders since fonts/colors differ.
-                cachedBlockSegments.removeAll()
-                setMarkdown(document)
-            }
-        }
-
-        public internal(set) weak var trackedScrollView: UIScrollView? // for selection updating
-
-        // Block-level render cache: stores rendered output per MarkdownBlockNode so
-        // unchanged blocks can be reused on the next streaming update without re-rendering.
-        struct CachedBlockSegment {
-            let node: MarkdownBlockNode
-            let attributedString: NSAttributedString
-            let subviews: [UIView]
-        }
-        var cachedBlockSegments: [CachedBlockSegment] = []
-
-        // Persistent mutable attributed string for the entire document.
-        // We mutate only the dirty tail in-place instead of rebuilding from scratch
-        // on every streaming update — converts O(n_total) concat to O(n_dirty).
-        var cachedAttributedString: NSMutableAttributedString = .init()
-
-        var contextViews: [UIView] = []
-        /// Cached value for setCodeBlockAutoScroll — guards against O(n_views) iteration
-        /// on every no-change updateUIView call during streaming (60fps × N messages).
-        private var _autoScrollEnabled: Bool = false
-        /// Cached value for setCodeBlockBarHidden — same guard pattern.
-        private var _barHidden: Bool = false
-        var cancellables = Set<AnyCancellable>()
-        let contentSubject = CurrentValueSubject<PreprocessedContent, Never>(.init())
-        public var throttleInterval: TimeInterval? = nil { // nil = instant per-token updates
-            didSet { setupCombine() }
-        }
-
-        let viewProvider: ReusableViewProvider
-
-        public init(viewProvider: ReusableViewProvider = .init()) {
-            self.viewProvider = viewProvider
-            super.init(frame: .zero)
-            textView.isSelectable = true
-            textView.backgroundColor = .clear
+    public internal(set) var document: PreprocessedContent = .init()
+    public let textView: LTXLabel = .init()
+    public var theme: MarkdownTheme = .default {
+        didSet {
             textView.selectionBackgroundColor = theme.colors.selectionBackground
-            textView.delegate = self
-            textView.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(textView)
-            NSLayoutConstraint.activate([
-                textView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                textView.trailingAnchor.constraint(equalTo: trailingAnchor),
-                textView.topAnchor.constraint(equalTo: topAnchor),
-                textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
-            setupCombine()
-        }
-
-        @available(*, unavailable)
-        public required init?(coder _: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        override public func layoutSubviews() {
-            super.layoutSubviews()
-            textView.preferredMaxLayoutWidth = bounds.width
-        }
-
-        override public var intrinsicContentSize: CGSize {
-            textView.intrinsicContentSize
-        }
-
-        public func boundingSize(for width: CGFloat) -> CGSize {
-            textView.preferredMaxLayoutWidth = width
-            return textView.intrinsicContentSize
-        }
-
-        public func setMarkdownManually(_ content: PreprocessedContent) {
-            assert(Thread.isMainThread)
-            resetCombine()
-            use(content)
-        }
-
-        public func setMarkdown(_ content: PreprocessedContent) {
-            contentSubject.send(content)
-        }
-
-        public func reset() {
-            assert(Thread.isMainThread)
-            use(.init())
-            setupCombine()
-        }
-
-        public func bindContentOffset(from scrollView: UIScrollView?) {
-            trackedScrollView = scrollView
-        }
-
-        /// Enables or disables auto-scroll-to-bottom on all CodeView subviews.
-        /// Call with `true` during streaming, `false` when streaming ends.
-        /// Guards against no-op iterations: since updateUIView (via RepresentableBase)
-        /// calls this on every layout pass even when content hasn't changed, iterating
-        /// all contextViews O(n_views) per frame was wasting CPU at 60fps. We skip the
-        /// loop entirely when the value hasn't changed.
-        public func setCodeBlockAutoScroll(_ enabled: Bool) {
-            guard enabled != _autoScrollEnabled else { return }
-            _autoScrollEnabled = enabled
-            for view in contextViews {
-                if let codeView = view as? CodeView {
-                    codeView.isStreaming = enabled
-                }
-            }
-        }
-
-        /// Shows or hides the built-in header bar on all CodeView subviews.
-        /// Call with `true` when a container view supplies its own header.
-        public func setCodeBlockBarHidden(_ hidden: Bool) {
-            guard hidden != _barHidden else { return }
-            _barHidden = hidden
-            for view in contextViews {
-                if let codeView = view as? CodeView {
-                    codeView.barHidden = hidden
-                }
-            }
-        }
-    }
-
-#elseif canImport(AppKit)
-    import AppKit
-
-    public final class MarkdownTextView: NSView {
-        public var linkHandler: ((LinkPayload, NSRange, CGPoint) -> Void)?
-        public var codePreviewHandler: ((String?, NSAttributedString) -> Void)?
-
-        public internal(set) var document: PreprocessedContent = .init()
-        public let textView: LTXLabel = .init()
-        public var theme: MarkdownTheme = .default {
-            didSet {
-                textView.selectionBackgroundColor = theme.colors.selectionBackground
-                // Theme change invalidates all cached block renders since fonts/colors differ.
-                cachedBlockSegments.removeAll()
-                setMarkdown(document)
-            }
-        }
-
-        public internal(set) weak var trackedScrollView: NSScrollView? // for selection updating
-
-        // Block-level render cache: stores rendered output per MarkdownBlockNode so
-        // unchanged blocks can be reused on the next streaming update without re-rendering.
-        struct CachedBlockSegment {
-            let node: MarkdownBlockNode
-            let attributedString: NSAttributedString
-            let subviews: [NSView]
-        }
-        var cachedBlockSegments: [CachedBlockSegment] = []
-
-        // Persistent mutable attributed string for the entire document.
-        // We mutate only the dirty tail in-place instead of rebuilding from scratch
-        // on every streaming update — converts O(n_total) concat to O(n_dirty).
-        var cachedAttributedString: NSMutableAttributedString = .init()
-
-        var contextViews: [NSView] = []
-        var cancellables = Set<AnyCancellable>()
-        let contentSubject = CurrentValueSubject<PreprocessedContent, Never>(.init())
-        public var throttleInterval: TimeInterval? = nil { // nil = instant per-token updates
-            didSet { setupCombine() }
-        }
-
-        let viewProvider: ReusableViewProvider
-
-        public init(viewProvider: ReusableViewProvider = .init()) {
-            self.viewProvider = viewProvider
-            super.init(frame: .zero)
-            textView.isSelectable = true
-            textView.selectionBackgroundColor = theme.colors.selectionBackground
-            wantsLayer = true
-            layer?.backgroundColor = NSColor.clear.cgColor
-            textView.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(textView)
-            NSLayoutConstraint.activate([
-                textView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                textView.trailingAnchor.constraint(equalTo: trailingAnchor),
-                textView.topAnchor.constraint(equalTo: topAnchor),
-                textView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            ])
-            setupCombine()
-        }
-
-        @available(*, unavailable)
-        public required init?(coder _: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        override public var isFlipped: Bool {
-            true
-        }
-
-        override public func viewDidChangeEffectiveAppearance() {
-            super.viewDidChangeEffectiveAppearance()
+            // Theme change invalidates all cached block renders since fonts/colors differ.
+            cachedBlockSegments.removeAll()
             setMarkdown(document)
         }
+    }
 
-        override public func layout() {
-            super.layout()
-            textView.preferredMaxLayoutWidth = bounds.width
-        }
+    // Block-level render cache: stores rendered output per MarkdownBlockNode so
+    // unchanged blocks can be reused on the next streaming update without re-rendering.
+    struct CachedBlockSegment {
+        let node: MarkdownBlockNode
+        let attributedString: NSAttributedString
+        let subviews: [UIView]
+    }
+    var cachedBlockSegments: [CachedBlockSegment] = []
 
-        override public var intrinsicContentSize: CGSize {
-            textView.intrinsicContentSize
-        }
+    // Persistent mutable attributed string for the entire document.
+    // We mutate only the dirty tail in-place instead of rebuilding from scratch
+    // on every streaming update — converts O(n_total) concat to O(n_dirty).
+    var cachedAttributedString: NSMutableAttributedString = .init()
 
-        public func boundingSize(for width: CGFloat) -> CGSize {
-            textView.preferredMaxLayoutWidth = width
-            return textView.intrinsicContentSize
-        }
+    var contextViews: [UIView] = []
+    /// Cached value for setCodeBlockAutoScroll — guards against O(n_views) iteration
+    /// on every no-change updateUIView call during streaming (60fps × N messages).
+    private var _autoScrollEnabled: Bool = false
+    /// Cached value for setCodeBlockBarHidden — same guard pattern.
+    private var _barHidden: Bool = false
+    var cancellables = Set<AnyCancellable>()
+    let contentSubject = CurrentValueSubject<PreprocessedContent, Never>(.init())
 
-        public func setMarkdownManually(_ content: PreprocessedContent) {
-            assert(Thread.isMainThread)
-            resetCombine()
-            use(content)
-        }
+    let viewProvider: ReusableViewProvider
 
-        public func setMarkdown(_ content: PreprocessedContent) {
-            contentSubject.send(content)
-        }
+    public init(viewProvider: ReusableViewProvider = .init()) {
+        self.viewProvider = viewProvider
+        super.init(frame: .zero)
+        textView.isSelectable = true
+        textView.backgroundColor = .clear
+        textView.selectionBackgroundColor = theme.colors.selectionBackground
+        textView.delegate = self
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(textView)
+        NSLayoutConstraint.activate([
+            textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            textView.topAnchor.constraint(equalTo: topAnchor),
+            textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        setupCombine()
+    }
 
-        public func reset() {
-            assert(Thread.isMainThread)
-            use(.init())
-            setupCombine()
-        }
+    @available(*, unavailable)
+    public required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
-        public func bindContentOffset(from scrollView: NSScrollView?) {
-            trackedScrollView = scrollView
+    override public func layoutSubviews() {
+        super.layoutSubviews()
+        textView.preferredMaxLayoutWidth = bounds.width
+    }
+
+    override public var intrinsicContentSize: CGSize {
+        textView.intrinsicContentSize
+    }
+
+    public func boundingSize(for width: CGFloat) -> CGSize {
+        textView.preferredMaxLayoutWidth = width
+        return textView.intrinsicContentSize
+    }
+
+    func setMarkdownManually(_ content: PreprocessedContent) {
+        assert(Thread.isMainThread)
+        resetCombine()
+        use(content)
+    }
+
+    public func setMarkdown(_ content: PreprocessedContent) {
+        contentSubject.send(content)
+    }
+
+    func reset() {
+        assert(Thread.isMainThread)
+        use(.init())
+        setupCombine()
+    }
+
+    /// Enables or disables auto-scroll-to-bottom on all CodeView subviews.
+    /// Call with `true` during streaming, `false` when streaming ends.
+    public func setCodeBlockAutoScroll(_ enabled: Bool) {
+        guard enabled != _autoScrollEnabled else { return }
+        _autoScrollEnabled = enabled
+        for view in contextViews {
+            if let codeView = view as? CodeView {
+                codeView.isStreaming = enabled
+            }
         }
     }
-#endif
+
+    /// Shows or hides the built-in header bar on all CodeView subviews.
+    /// Call with `true` when a container view supplies its own header.
+    public func setCodeBlockBarHidden(_ hidden: Bool) {
+        guard hidden != _barHidden else { return }
+        _barHidden = hidden
+        for view in contextViews {
+            if let codeView = view as? CodeView {
+                codeView.barHidden = hidden
+            }
+        }
+    }
+}

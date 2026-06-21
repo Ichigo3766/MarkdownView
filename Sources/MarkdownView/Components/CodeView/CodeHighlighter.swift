@@ -6,21 +6,14 @@
 import Foundation
 import Highlighter
 import LRUCache
+import UIKit
 
-#if canImport(UIKit)
-    import UIKit
-    public typealias PlatformColor = UIColor
-#elseif canImport(AppKit)
-    import AppKit
-    public typealias PlatformColor = NSColor
-#endif
+public typealias PlatformColor = UIColor
 
 public final class CodeHighlighter: @unchecked Sendable {
     public typealias HighlightMap = [NSRange: PlatformColor]
 
-    // LRU cache: 256 entries per appearance variant.
-    // Key encodes both content + language + dark/light so the two variants
-    // don't collide.
+    // LRU cache: 512 entries.
     public private(set) var renderCache = LRUCache<Int, HighlightMap>(countLimit: 512)
 
     // HighlighterSwift wraps a JSContext internally. JSContext is NOT thread-safe,
@@ -31,8 +24,6 @@ public final class CodeHighlighter: @unchecked Sendable {
     )
 
     // Two Highlighter instances — one per appearance.
-    // "atom-one-light" → light mode
-    // "atom-one-dark"  → dark mode
     private let lightHighlighter: Highlighter?
     private let darkHighlighter: Highlighter?
 
@@ -58,7 +49,7 @@ public final class CodeHighlighter: @unchecked Sendable {
 
     // MARK: - Key Generation
 
-    /// `isDark` is folded into the hash so light and dark cached results don't collide.
+    /// Generates a stable cache key incorporating content, language, and appearance.
     public func key(for content: String, language: String?, isDark: Bool) -> Int {
         var hasher = Hasher()
         hasher.combine(content)
@@ -68,7 +59,8 @@ public final class CodeHighlighter: @unchecked Sendable {
     }
 
     /// Convenience overload — reads current appearance automatically.
-    /// Used by callers that don't have an explicit `isDark` value.
+    /// MUST be called on main thread (reads UITraitCollection.current).
+    @MainActor
     public func key(for content: String, language: String?) -> Int {
         key(for: content, language: language, isDark: currentAppearanceIsDark())
     }
@@ -137,8 +129,6 @@ public final class CodeHighlighter: @unchecked Sendable {
                 let nsAttrStr: NSAttributedString?
 
                 if lang.isEmpty || lang == "plaintext" {
-                    // Auto-detection is significantly more expensive than explicit highlighting.
-                    // Skip it for large blocks.
                     if highlightContent.count > 5_000 {
                         continuation.resume(returning: [:])
                         return
@@ -168,17 +158,9 @@ public final class CodeHighlighter: @unchecked Sendable {
     // MARK: - Appearance Helper
 
     /// Returns true if the current system appearance is dark.
-    /// Must be called from the main thread (or at least before hopping off it).
+    /// Safe to call from main thread.
     private func currentAppearanceIsDark() -> Bool {
-        #if canImport(UIKit)
-            // UITraitCollection.current is safe to read on any thread when called
-            // from a SwiftUI/UIKit update context. We capture it before the queue hop.
-            return UITraitCollection.current.userInterfaceStyle == .dark
-        #elseif canImport(AppKit)
-            return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        #else
-            return false
-        #endif
+        UITraitCollection.current.userInterfaceStyle == .dark
     }
 
     // MARK: - NSAttributedString → HighlightMap Conversion
@@ -225,8 +207,6 @@ public extension CodeHighlighter.HighlightMap {
     }
 
     /// Apply highlights to a **slice** of the full content.
-    /// `charOffset` is the character index in the full string where `slice` begins.
-    /// Only ranges that overlap the slice are applied, shifted by -charOffset.
     func apply(toSlice slice: String, charOffset: Int, with theme: MarkdownTheme) -> NSMutableAttributedString {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineSpacing = CodeViewConfiguration.codeLineSpacing
@@ -245,11 +225,9 @@ public extension CodeHighlighter.HighlightMap {
         let sliceEnd = charOffset + sliceLength
 
         for (range, color) in self {
-            // Skip ranges entirely outside the slice
             guard range.upperBound > charOffset, range.location < sliceEnd else { continue }
             guard color != plainTextColor else { continue }
 
-            // Clamp to the slice boundaries (use Swift.max/min to avoid Sequence method ambiguity)
             let clampedStart = Swift.max(range.location, charOffset)
             let clampedEnd = Swift.min(range.upperBound, sliceEnd)
             let localRange = NSRange(location: clampedStart - charOffset, length: clampedEnd - clampedStart)

@@ -7,21 +7,16 @@
 
 import MarkdownParser
 import SwiftUI
+import UIKit
 
 protocol MarkdownViewRepresentableBase {
     var contentSource: MarkdownView.ContentSource { get }
     var theme: MarkdownTheme { get }
-    /// When true, this view is inside an actively-streaming message.
-    /// Used to select the throttled update path and stabilize height.
     var codeBlockAutoScroll: Bool { get }
-    /// When true, the built-in code block header bar is hidden for all code blocks.
     var codeBlockBarHidden: Bool { get }
 }
 
 extension MarkdownViewRepresentableBase {
-    // Default implementation so AppKit conformers don't need to declare this.
-    var codeBlockBarHidden: Bool { false }
-
     func createMarkdownTextView() -> MarkdownTextView {
         let view = MarkdownTextView()
         view.theme = theme
@@ -29,7 +24,6 @@ extension MarkdownViewRepresentableBase {
         view.setContentCompressionResistancePriority(.required, for: .vertical)
         view.setContentHuggingPriority(.defaultLow, for: .horizontal)
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        #if canImport(UIKit)
         view.linkHandler = { payload, _, _ in
             let url: URL?
             switch payload {
@@ -52,7 +46,6 @@ extension MarkdownViewRepresentableBase {
                 userInfo: ["code": code, "language": language ?? ""]
             )
         }
-        #endif
         return view
     }
 
@@ -65,51 +58,36 @@ extension MarkdownViewRepresentableBase {
             let themeChanged = coordinator.lastTheme != theme
 
             guard textChanged || themeChanged else {
-                // Nothing changed — still update code block flags.
-                #if canImport(UIKit)
                 view.setCodeBlockAutoScroll(isStreaming)
                 view.setCodeBlockBarHidden(codeBlockBarHidden)
-                #endif
                 return
             }
 
             if isStreaming {
                 // ── Streaming: parse on background thread ─────────────────────
-                // Cancel any in-flight parse from the previous tick so we never
-                // pile up N parse tasks. Only the latest text wins.
                 coordinator.parseTask?.cancel()
 
-                // Capture everything the background work needs — no coordinator
-                // or view captures allowed off main thread.
                 let capturedText = text
                 let capturedTheme = theme
+                let capturedBarHidden = codeBlockBarHidden
                 let incrementalParser = coordinator.incrementalParser
 
-                // Update lastText immediately so the guard above fires correctly
-                // on the *next* SwiftUI update tick even if the Task hasn't finished.
                 coordinator.lastText = text
                 coordinator.lastTheme = theme
 
-                coordinator.parseTask = Task.detached(priority: .userInitiated) { [weak coordinator] in
+                coordinator.parseTask = Task.detached(priority: .userInitiated) {
                     guard !Task.isCancelled else { return }
-                    // IncrementalStreamingParser is a final class with value-type
-                    // internal state; all mutations happen here off main thread.
                     let parsed = incrementalParser.parse(capturedText, theme: capturedTheme)
                     guard !Task.isCancelled else { return }
 
-                    await MainActor.run { [weak coordinator] in
-                        guard coordinator != nil else { return }
+                    await MainActor.run {
                         view.theme = capturedTheme
                         view.setMarkdownManually(parsed)
-                        // Invalidate so sizeThatFits is re-queried on the next layout pass.
                         view.invalidateIntrinsicContentSize()
-                        #if canImport(UIKit)
                         view.setCodeBlockAutoScroll(true)
-                        view.setCodeBlockBarHidden(codeBlockBarHidden)
-                        #endif
+                        view.setCodeBlockBarHidden(capturedBarHidden)
                     }
                 }
-                // Return immediately — the Task delivers the result asynchronously.
                 return
 
             } else {
@@ -124,29 +102,24 @@ extension MarkdownViewRepresentableBase {
                 coordinator.lastText = text
                 coordinator.lastTheme = theme
 
-                coordinator.parseTask = Task.detached(priority: .userInitiated) { [weak coordinator] in
+                coordinator.parseTask = Task.detached(priority: .userInitiated) {
                     guard !Task.isCancelled else { return }
                     let parser = MarkdownParser()
                     let result = parser.parse(capturedText)
-                    // Pass 1: deliver text immediately (no math images yet).
                     let preprocessed = MarkdownTextView.PreprocessedContent(parserResultNoMath: result)
                     guard !Task.isCancelled else { return }
 
-                    await MainActor.run { [weak coordinator] in
-                        guard coordinator != nil else { return }
+                    await MainActor.run {
                         view.theme = capturedTheme
                         view.setMarkdownManually(preprocessed)
                         view.invalidateIntrinsicContentSize()
-                        #if canImport(UIKit)
                         view.setCodeBlockAutoScroll(false)
                         view.setCodeBlockBarHidden(capturedCodeBlockBarHidden)
-                        #endif
                     }
 
                     // Pass 2: render math off-thread, then refresh the view.
                     guard !Task.isCancelled else { return }
                     preprocessed.renderMathAsync(theme: capturedTheme) { @MainActor in
-                        guard coordinator != nil else { return }
                         view.setMarkdownManually(preprocessed)
                         view.invalidateIntrinsicContentSize()
                     }
@@ -165,10 +138,8 @@ extension MarkdownViewRepresentableBase {
                 view.setMarkdownManually(preprocessedContent)
                 view.invalidateIntrinsicContentSize()
             }
-            #if canImport(UIKit)
             view.setCodeBlockAutoScroll(isStreaming)
             view.setCodeBlockBarHidden(codeBlockBarHidden)
-            #endif
         }
     }
 }

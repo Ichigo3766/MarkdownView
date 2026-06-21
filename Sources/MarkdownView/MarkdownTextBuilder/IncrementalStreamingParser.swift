@@ -41,11 +41,7 @@ final class IncrementalStreamingParser {
     /// Pre-parsed blocks for `cachedText`.
     private var cachedBlocks: [MarkdownBlockNode] = []
 
-    /// Pre-rendered math map for `cachedText`.
-    /// During streaming we skip synchronous math rendering, so this stays empty.
-    private var cachedRendered: RenderedTextContent.Map = [:]
-
-    /// The theme used when building `cachedBlocks`/`cachedRendered`.
+    /// The theme used when building `cachedBlocks`.
     private var cachedTheme: MarkdownTheme = .default
 
     // MARK: - Tuning
@@ -63,8 +59,6 @@ final class IncrementalStreamingParser {
     func reset() {
         cachedText = ""
         cachedBlocks = []
-        cachedRendered = [:]
-        // Note: keep cachedTheme — it will be validated on next parse() call.
     }
 
     /// Returns a `PreprocessedContent` for `newText`, reusing as much cached

@@ -9,44 +9,19 @@ import CoreText
 import Foundation
 import Litext
 import MarkdownParser
+import UIKit
 
-#if canImport(UIKit)
-    import UIKit
+private func builtinSystemImage(_ name: String, size: CGFloat = 16) -> UIImage {
+    guard let image = UIImage(
+        systemName: name,
+        withConfiguration: UIImage.SymbolConfiguration(scale: .small)
+    ) else { return .init() }
+    let templateImage = image.withTintColor(.label, renderingMode: .alwaysTemplate)
+    return templateImage.resized(to: .init(width: size, height: size))
+}
 
-    private func builtinSystemImage(_ name: String, size: CGFloat = 16) -> UIImage {
-        guard let image = UIImage(
-            systemName: name,
-            withConfiguration: UIImage.SymbolConfiguration(scale: .small)
-        ) else { return .init() }
-        let templateImage = image.withTintColor(.label, renderingMode: .alwaysTemplate)
-        return templateImage.resized(to: .init(width: size, height: size))
-    }
-
-    private let kCheckedBoxImage = builtinSystemImage("checkmark.square.fill")
-    private let kUncheckedBoxImage = builtinSystemImage("square")
-
-    private func kNumberCircleImage(_ number: Int) -> UIImage {
-        builtinSystemImage("\(number).circle.fill")
-    }
-
-#elseif canImport(AppKit)
-    import AppKit
-
-    private func builtinSystemImage(_ name: String, size _: CGFloat = 16) -> NSImage {
-        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else {
-            return NSImage()
-        }
-        let config = NSImage.SymbolConfiguration(scale: .small)
-        return image.withSymbolConfiguration(config) ?? image
-    }
-
-    private let kCheckedBoxImage = builtinSystemImage("checkmark.square.fill")
-    private let kUncheckedBoxImage = builtinSystemImage("square")
-
-    private func kNumberCircleImage(_ number: Int) -> NSImage {
-        builtinSystemImage("\(number).circle.fill")
-    }
-#endif
+private let kCheckedBoxImage = builtinSystemImage("checkmark.square.fill")
+private let kUncheckedBoxImage = builtinSystemImage("square")
 
 extension TextBuilder {
     /// Builds a single block node with all the drawing callbacks wired up.
@@ -116,11 +91,7 @@ extension TextBuilder {
                     .offsetBy(dx: -16, dy: 0)
                     .offsetBy(dx: -8, dy: 0)
                 let image = if isChecked { kCheckedBoxImage } else { kUncheckedBoxImage }
-                #if canImport(UIKit)
-                    guard let cgImage = image.cgImage else { return }
-                #elseif canImport(AppKit)
-                    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-                #endif
+                guard let cgImage = image.cgImage else { return }
                 let imageSize = image.size
                 let targetRect: CGRect = .init(
                     x: rect.minX,
@@ -137,11 +108,7 @@ extension TextBuilder {
                 guard let view else { return }
                 let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
                 context.setLineWidth(1)
-                #if canImport(UIKit)
-                    context.setStrokeColor(UIColor.label.withAlphaComponent(0.1).cgColor)
-                #elseif canImport(AppKit)
-                    context.setStrokeColor(NSColor.labelColor.withAlphaComponent(0.1).cgColor)
-                #endif
+                context.setStrokeColor(UIColor.label.withAlphaComponent(0.1).cgColor)
                 context.move(to: .init(x: boundingBox.minX, y: boundingBox.midY))
                 context.addLine(to: .init(x: boundingBox.minX + view.bounds.width, y: boundingBox.midY))
                 context.strokePath()
@@ -286,11 +253,7 @@ extension TextBuilder {
                     .offsetBy(dx: -16, dy: 0)
                     .offsetBy(dx: -8, dy: 0)
                 let image = if isChecked { kCheckedBoxImage } else { kUncheckedBoxImage }
-                #if canImport(UIKit)
-                    guard let cgImage = image.cgImage else { return }
-                #elseif canImport(AppKit)
-                    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-                #endif
+                guard let cgImage = image.cgImage else { return }
                 let imageSize = image.size
                 let targetRect: CGRect = .init(
                     x: rect.minX,
@@ -308,11 +271,7 @@ extension TextBuilder {
                 let boundingBox = lineBoundingBox(line, lineOrigin: lineOrigin)
 
                 context.setLineWidth(1)
-                #if canImport(UIKit)
-                    context.setStrokeColor(UIColor.label.withAlphaComponent(0.1).cgColor)
-                #elseif canImport(AppKit)
-                    context.setStrokeColor(NSColor.labelColor.withAlphaComponent(0.1).cgColor)
-                #endif
+                context.setStrokeColor(UIColor.label.withAlphaComponent(0.1).cgColor)
                 context.move(to: .init(x: boundingBox.minX, y: boundingBox.midY))
                 context.addLine(to: .init(x: boundingBox.minX + view.bounds.width, y: boundingBox.midY))
                 context.strokePath()

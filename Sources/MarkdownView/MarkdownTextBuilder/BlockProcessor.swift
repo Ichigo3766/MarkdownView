@@ -6,11 +6,7 @@
 import CoreText
 import Litext
 import MarkdownParser
-#if canImport(UIKit)
-    import UIKit
-#elseif canImport(AppKit)
-    import AppKit
-#endif
+import UIKit
 
 // MARK: - BlockProcessor
 
@@ -44,8 +40,8 @@ import MarkdownParser
         self.blockquoteDrawing = blockquoteDrawing
     }
 
-    func processHeading(level _: Int, contents: [MarkdownInlineNode]) -> NSAttributedString {
-        let font: PlatformFont = theme.fonts.title
+    func processHeading(level: Int, contents: [MarkdownInlineNode]) -> NSAttributedString {
+        let font: PlatformFont = theme.fontForHeadingLevel(level)
 
         return buildWithParagraphSync { paragraph in
             paragraph.paragraphSpacing = theme.spacings.headingSpacing
@@ -225,15 +221,4 @@ extension BlockProcessor {
         return string
     }
 
-    private func removeLeadingSpacing(from attributedString: NSAttributedString) -> NSAttributedString {
-        let mutableString = attributedString.mutableCopy() as! NSMutableAttributedString
-        mutableString.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: mutableString.length), options: []) { value, range, _ in
-            if let style = value as? NSParagraphStyle {
-                let mutableStyle = style.mutableCopy() as! NSMutableParagraphStyle
-                mutableStyle.paragraphSpacingBefore = 0
-                mutableString.addAttribute(.paragraphStyle, value: mutableStyle, range: range)
-            }
-        }
-        return mutableString
-    }
 }

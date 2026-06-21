@@ -7,12 +7,7 @@
 
 import Foundation
 import Litext
-
-#if canImport(UIKit)
-    import UIKit
-#elseif canImport(AppKit)
-    import AppKit
-#endif
+import UIKit
 
 public extension MarkdownTheme {
     static var `default`: MarkdownTheme = .init()
@@ -21,75 +16,40 @@ public extension MarkdownTheme {
 
 public struct MarkdownTheme: Equatable, @unchecked Sendable {
     public struct Fonts: Equatable, @unchecked Sendable {
-        #if canImport(UIKit)
-            public var body = UIFont.preferredFont(forTextStyle: .body)
-            public var codeInline = UIFont.monospacedSystemFont(
-                ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize,
-                weight: .regular
-            )
-            public var bold = UIFont.preferredFont(forTextStyle: .body).bold
-            public var italic = UIFont.preferredFont(forTextStyle: .body).italic
-            public var code = UIFont.monospacedSystemFont(
-                ofSize: ceil(UIFont.preferredFont(forTextStyle: .body).pointSize * codeScale),
-                weight: .regular
-            )
-            public var largeTitle = UIFont.preferredFont(forTextStyle: .body).bold
-            public var title = UIFont.preferredFont(forTextStyle: .body).bold
-            public var footnote = UIFont.preferredFont(forTextStyle: .footnote)
-        #elseif canImport(AppKit)
-            public var body = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-            public var codeInline = NSFont.monospacedSystemFont(
-                ofSize: NSFont.systemFontSize,
-                weight: .regular
-            )
-            public var bold = NSFont.systemFont(ofSize: NSFont.systemFontSize).bold
-            public var italic = NSFont.systemFont(ofSize: NSFont.systemFontSize).italic
-            public var code = NSFont.monospacedSystemFont(
-                ofSize: ceil(NSFont.systemFontSize * codeScale),
-                weight: .regular
-            )
-            public var largeTitle = NSFont.systemFont(ofSize: NSFont.systemFontSize).bold
-            public var title = NSFont.systemFont(ofSize: NSFont.systemFontSize).bold
-            public var footnote = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        #endif
+        public var body = UIFont.preferredFont(forTextStyle: .body)
+        public var codeInline = UIFont.monospacedSystemFont(
+            ofSize: UIFont.preferredFont(forTextStyle: .body).pointSize,
+            weight: .regular
+        )
+        public var bold = UIFont.preferredFont(forTextStyle: .body).bold
+        public var italic = UIFont.preferredFont(forTextStyle: .body).italic
+        public var code = UIFont.monospacedSystemFont(
+            ofSize: ceil(UIFont.preferredFont(forTextStyle: .body).pointSize * codeScale),
+            weight: .regular
+        )
+        public var largeTitle = UIFont.preferredFont(forTextStyle: .body).bold
+        public var title = UIFont.preferredFont(forTextStyle: .body).bold
+        public var footnote = UIFont.preferredFont(forTextStyle: .footnote)
     }
 
     public var fonts: Fonts = .init()
 
     public struct Colors: Equatable, @unchecked Sendable {
-        #if canImport(UIKit)
-            public var body = UIColor.label
-            public var highlight =
-                UIColor(named: "AccentColor")
+        public var body = UIColor.label
+        public var highlight =
+            UIColor(named: "AccentColor")
+                ?? UIColor(named: "accentColor")
+                ?? .systemOrange
+        public var emphasis =
+            UIColor(named: "AccentColor")
+                ?? UIColor(named: "accentColor")
+                ?? .systemOrange
+        public var code = UIColor.label
+        public var codeBackground = UIColor.gray.withAlphaComponent(0.25)
+        public var selectionBackground: UIColor? =
+            (UIColor(named: "AccentColor")
                     ?? UIColor(named: "accentColor")
-                    ?? .systemOrange
-            public var emphasis =
-                UIColor(named: "AccentColor")
-                    ?? UIColor(named: "accentColor")
-                    ?? .systemOrange
-            public var code = UIColor.label
-            public var codeBackground = UIColor.gray.withAlphaComponent(0.25)
-            public var selectionBackground: UIColor? =
-                (UIColor(named: "AccentColor")
-                        ?? UIColor(named: "accentColor")
-                        ?? .systemOrange).withAlphaComponent(0.2)
-        #elseif canImport(AppKit)
-            public var body = NSColor.labelColor
-            public var highlight =
-                NSColor(named: "AccentColor")
-                    ?? NSColor(named: "accentColor")
-                    ?? .systemOrange
-            public var emphasis =
-                NSColor(named: "AccentColor")
-                    ?? NSColor(named: "accentColor")
-                    ?? .systemOrange
-            public var code = NSColor.labelColor
-            public var codeBackground = NSColor.gray.withAlphaComponent(0.25)
-            public var selectionBackground: NSColor? =
-                (NSColor(named: "AccentColor")
-                        ?? NSColor(named: "accentColor")
-                        ?? .systemOrange).withAlphaComponent(0.2)
-        #endif
+                    ?? .systemOrange).withAlphaComponent(0.2)
     }
 
     public var colors: Colors = .init()
@@ -100,12 +60,8 @@ public struct MarkdownTheme: Equatable, @unchecked Sendable {
         public var list: CGFloat = 8
         public var cell: CGFloat = 32
         /// Spacing between paragraphs (after each paragraph block).
-        /// Controls the visible gap between stanzas, sections, etc.
-        /// 16pt provides a clear visual break matching Open WebUI's web rendering.
         public var paragraphSpacing: CGFloat = 16
         /// Line spacing within a paragraph (between soft-break lines).
-        /// 4pt gives comfortable readability for poem lines within a stanza,
-        /// while still being visually distinct from the 16pt paragraph gap.
         public var lineSpacing: CGFloat = 4
         /// Spacing before/after headings.
         public var headingSpacing: CGFloat = 12
@@ -126,17 +82,10 @@ public struct MarkdownTheme: Equatable, @unchecked Sendable {
     public struct Table: Equatable, @unchecked Sendable {
         public var cornerRadius: CGFloat = 8
         public var borderWidth: CGFloat = 1
-        #if canImport(UIKit)
-            public var borderColor = UIColor.separator
-            public var headerBackgroundColor = UIColor.systemGray6
-            public var cellBackgroundColor = UIColor.clear
-            public var stripeCellBackgroundColor = UIColor.systemGray.withAlphaComponent(0.03)
-        #elseif canImport(AppKit)
-            public var borderColor = NSColor.separatorColor
-            public var headerBackgroundColor = NSColor.windowBackgroundColor
-            public var cellBackgroundColor = NSColor.clear
-            public var stripeCellBackgroundColor = NSColor.systemGray.withAlphaComponent(0.03)
-        #endif
+        public var borderColor = UIColor.separator
+        public var headerBackgroundColor = UIColor.systemGray6
+        public var cellBackgroundColor = UIColor.clear
+        public var stripeCellBackgroundColor = UIColor.systemGray.withAlphaComponent(0.03)
     }
 
     public var table: Table = .init()
@@ -145,25 +94,11 @@ public struct MarkdownTheme: Equatable, @unchecked Sendable {
 }
 
 public extension MarkdownTheme {
-    static var defaultValueFont: Fonts {
-        Fonts()
-    }
-
-    static var defaultValueColor: Colors {
-        Colors()
-    }
-
-    static var defaultValueSpacing: Spacings {
-        Spacings()
-    }
-
-    static var defaultValueSize: Sizes {
-        Sizes()
-    }
-
-    static var defaultValueTable: Table {
-        Table()
-    }
+    static var defaultValueFont: Fonts { Fonts() }
+    static var defaultValueColor: Colors { Colors() }
+    static var defaultValueSpacing: Spacings { Spacings() }
+    static var defaultValueSize: Sizes { Sizes() }
+    static var defaultValueTable: Table { Table() }
 }
 
 public extension MarkdownTheme {
@@ -213,5 +148,22 @@ public extension MarkdownTheme {
         fonts.code = fonts.code.withSize(pointSize * Self.codeScale)
         fonts.largeTitle = fonts.largeTitle.withSize(pointSize).bold
         fonts.title = fonts.title.withSize(pointSize).bold
+    }
+
+    /// Returns the appropriate bold font for a heading level (1–6).
+    /// h1 is the largest, h6 is body-sized bold.
+    func fontForHeadingLevel(_ level: Int) -> UIFont {
+        let bodySize = fonts.body.pointSize
+        let scale: CGFloat
+        switch level {
+        case 1: scale = 1.6
+        case 2: scale = 1.35
+        case 3: scale = 1.15
+        case 4: scale = 1.0
+        case 5: scale = 0.9
+        case 6: scale = 0.85
+        default: scale = 1.0
+        }
+        return UIFont.systemFont(ofSize: bodySize * scale, weight: .bold)
     }
 }

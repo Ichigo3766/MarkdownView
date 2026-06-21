@@ -22,7 +22,6 @@
 //    StreamingCodeBlockView(language: "python", content: liveCode, isStreaming: true)
 //
 
-#if canImport(UIKit)
 import SwiftUI
 import UIKit
 
@@ -109,4 +108,3 @@ public struct StreamingCodeBlockView: UIViewRepresentable {
         return CGSize(width: width, height: height)
     }
 }
-#endif

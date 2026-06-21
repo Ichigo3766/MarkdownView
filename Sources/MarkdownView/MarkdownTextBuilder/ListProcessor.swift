@@ -6,11 +6,7 @@
 import CoreText
 import Litext
 import MarkdownParser
-#if canImport(UIKit)
     import UIKit
-#elseif canImport(AppKit)
-    import AppKit
-#endif
 
 // MARK: - ListProcessor
 

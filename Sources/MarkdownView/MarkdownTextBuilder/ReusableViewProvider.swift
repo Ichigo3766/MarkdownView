@@ -4,17 +4,18 @@
 //
 
 import DequeModule
-#if canImport(UIKit)
-    import UIKit
-#elseif canImport(AppKit)
-    import AppKit
-#endif
+import UIKit
 
 private class ObjectPool<T: Equatable & Hashable> {
     private let factory: () -> T
     fileprivate lazy var objects: Deque<T> = .init()
 
-    init(_ factory: @escaping () -> T) {
+    /// Maximum number of idle objects retained in the pool.
+    /// When exceeded, the oldest objects are evicted to free memory.
+    private let maxPoolSize: Int
+
+    init(maxPoolSize: Int = 32, _ factory: @escaping () -> T) {
+        self.maxPoolSize = maxPoolSize
         self.factory = factory
     }
 
@@ -28,6 +29,10 @@ private class ObjectPool<T: Equatable & Hashable> {
 
     func stash(_ object: T) {
         objects.append(object)
+        // Evict excess objects to prevent unbounded growth in long chats.
+        while objects.count > maxPoolSize {
+            objects.removeFirst()
+        }
     }
 
     func reorder(matching sequence: [T]) {
@@ -38,7 +43,7 @@ private class ObjectPool<T: Equatable & Hashable> {
             current.remove(content)
         }
         for reset in current {
-            objects.append(reset) // stash the rest
+            objects.append(reset)
         }
     }
 }
@@ -86,10 +91,6 @@ public final class ReusableViewProvider {
     }
 
     func reorderViews(matching sequence: [PlatformView]) {
-        // we adjust the sequence of stashed views to match the order
-        // afterwards when TextBuilder visit a node requesting new view
-        // it will follow the order to avoid glitch
-
         let orderedCodeView = sequence.compactMap { $0 as? CodeView }
         let orderedTableView = sequence.compactMap { $0 as? TableView }
 

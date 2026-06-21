@@ -9,11 +9,7 @@ import Foundation
 import Litext
 import MarkdownParser
 import SwiftMath
-#if canImport(UIKit)
-    import UIKit
-#elseif canImport(AppKit)
-    import AppKit
-#endif
+import UIKit
 
 extension [MarkdownInlineNode] {
     @MainActor func render(theme: MarkdownTheme, context: MarkdownTextView.PreprocessedContent, viewProvider: ReusableViewProvider) -> NSMutableAttributedString {
@@ -81,7 +77,7 @@ extension MarkdownInlineNode {
             let ans = NSMutableAttributedString()
             children.map { $0.render(theme: theme, context: context, viewProvider: viewProvider) }.forEach { ans.append($0) }
             ans.addAttributes(
-                [.strikethroughStyle: NSUnderlineStyle.thick.rawValue],
+                [.strikethroughStyle: NSUnderlineStyle.single.rawValue],
                 range: NSRange(location: 0, length: ans.length)
             )
             return ans
@@ -168,25 +164,10 @@ extension MarkdownInlineNode {
                     )
 
                     context.saveGState()
-
-                    #if canImport(UIKit)
-                        context.translateBy(x: 0, y: rect.origin.y + rect.size.height)
-                        context.scaleBy(x: 1, y: -1)
-                        context.translateBy(x: 0, y: -rect.origin.y)
-                        image.draw(in: rect)
-                    #else
-                        assert(image.isTemplate)
-                        if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                            // Resolve label color at draw time for dynamic appearance updates
-                            let labelColor = NSColor.labelColor.cgColor
-                            context.clip(to: rect, mask: cgImage)
-                            context.setFillColor(labelColor)
-                            context.fill(rect)
-                        } else {
-                            assertionFailure()
-                        }
-                    #endif
-
+                    context.translateBy(x: 0, y: rect.origin.y + rect.size.height)
+                    context.scaleBy(x: 1, y: -1)
+                    context.translateBy(x: 0, y: -rect.origin.y)
+                    image.draw(in: rect)
                     context.restoreGState()
                 }
                 let attachment = LTXAttachment.hold(attrString: .init(string: latexContent))
