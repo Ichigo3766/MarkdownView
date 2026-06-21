@@ -97,9 +97,10 @@ public extension MarkdownTextView {
                     map[replacementText] = RenderedTextContent(image: image, text: value)
                 }
                 guard !Task.isCancelled else { return }
+                let finalMap = map
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    self.rendered = map
+                    self.rendered = finalMap
                     completion()
                 }
             }
