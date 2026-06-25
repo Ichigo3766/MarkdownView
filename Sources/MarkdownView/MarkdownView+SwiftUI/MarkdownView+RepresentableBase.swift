@@ -14,6 +14,7 @@ protocol MarkdownViewRepresentableBase {
     var theme: MarkdownTheme { get }
     var codeBlockAutoScroll: Bool { get }
     var codeBlockBarHidden: Bool { get }
+    var citationSources: [Int: URL] { get }
 }
 
 extension MarkdownViewRepresentableBase {
@@ -51,11 +52,53 @@ extension MarkdownViewRepresentableBase {
 
     func updateMarkdownTextView(_ view: MarkdownTextView, coordinator: MarkdownViewCoordinator) {
         let isStreaming = codeBlockAutoScroll
+        defer { coordinator.lastStreamingState = isStreaming }
 
         switch contentSource {
         case let .text(text):
             let textChanged = coordinator.lastText != text
             let themeChanged = coordinator.lastTheme != theme
+            let wasStreaming = coordinator.lastStreamingState
+            let streamingJustEnded = wasStreaming && !isStreaming
+
+            // ── Streaming → idle transition ────────────────────────────────
+            // Instead of a full re-parse (which replaces the entire attributed
+            // string and jumps scroll position), use the incremental parser's
+            // finalize() to settle only the unsettled tail blocks in-place.
+            // The block-level diff in updateTextExecute() ensures only the
+            // changed blocks are re-rendered — stable content stays untouched.
+            if streamingJustEnded {
+                coordinator.parseTask?.cancel()
+
+                let capturedText = coordinator.lastText  // final streamed text
+                let capturedTheme = theme
+                let capturedBarHidden = codeBlockBarHidden
+                let incrementalParser = coordinator.incrementalParser
+
+                coordinator.lastText = capturedText
+                coordinator.lastTheme = capturedTheme
+
+                coordinator.parseTask = Task.detached(priority: .userInitiated) {
+                    guard !Task.isCancelled else { return }
+                    // finalize() settles the whole text with minTailLength=0,
+                    // rendering citations/math in the final paragraph without
+                    // rebuilding the whole attributed string from scratch.
+                    let finalized = incrementalParser.finalize(capturedText, theme: capturedTheme)
+                    guard !Task.isCancelled else { return }
+
+                    await MainActor.run {
+                        view.theme = capturedTheme
+                        view.setMarkdownManually(finalized)
+                        view.invalidateIntrinsicContentSize()
+                        view.setCodeBlockAutoScroll(false)
+                        view.setCodeBlockBarHidden(capturedBarHidden)
+                    }
+                }
+
+                view.setCodeBlockAutoScroll(false)
+                view.setCodeBlockBarHidden(codeBlockBarHidden)
+                return
+            }
 
             guard textChanged || themeChanged else {
                 view.setCodeBlockAutoScroll(isStreaming)

@@ -38,6 +38,12 @@ import UIKit
             heights = Array(repeating: 0, count: numberOfRows)
             trimSurplusCells(keeping: requiredCellCount)
 
+            // Move all existing cells off-screen so stale positions don't
+            // show through during the layout-pass gap before layoutCells() runs.
+            for cell in cells {
+                cell.frame = CGRect(x: -9999, y: -9999, width: 0, height: 0)
+            }
+
             // Configure cells for each row and column
             for (row, rowContent) in contents.enumerated() {
                 var rowHeight: CGFloat = 0

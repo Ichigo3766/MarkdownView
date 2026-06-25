@@ -31,21 +31,6 @@ public extension MarkdownTextView {
             self.mathContext = [:]
         }
 
-        /// Init carrying an explicit math context (used by the incremental
-        /// streaming parser so equations in the settled/stable portion can be
-        /// rendered live during streaming instead of snapping in at stream end).
-        public init(
-            blocks: [MarkdownBlockNode],
-            rendered: RenderedTextContent.Map,
-            highlightMaps: [Int: CodeHighlighter.HighlightMap],
-            mathContext: [Int: String]
-        ) {
-            self.blocks = blocks
-            self.rendered = rendered
-            self.highlightMaps = highlightMaps
-            self.mathContext = mathContext
-        }
-
         /// Fast init: parses but does NOT render math images.
         /// The caller should fire `renderMathAsync(theme:)` to fill `rendered` off-thread.
         public init(parserResultNoMath parserResult: MarkdownParser.ParseResult) {

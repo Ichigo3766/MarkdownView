@@ -24,6 +24,12 @@ public struct MarkdownView: View {
     /// When true, the built-in header bar of every code block is hidden.
     /// Use this when a parent view provides its own header (e.g. PythonCodeBlockView).
     public var codeBlockBarHidden: Bool = false
+    /// Maps citation index (1-based) to a source URL.
+    /// When provided, bare `[1]` / `[1, 2]` patterns in the streamed text are
+    /// pre-expanded to styled citation pills immediately — no need to wait for
+    /// stream completion. Groups of >2 citations show the first two inline plus
+    /// a `+N more` overflow pill.
+    public var citationSources: [Int: URL] = [:]
 
     public init(_ text: String, theme: MarkdownTheme = .default) {
         contentSource = .text(text)
@@ -51,6 +57,17 @@ public struct MarkdownView: View {
         return copy
     }
 
+    /// Fluent setter for citation sources.
+    /// Pass the map of 1-based citation index → URL so that bare `[N]` patterns
+    /// emitted by the model are expanded into styled citation pills in real-time
+    /// during streaming. Groups of more than two citations collapse into an
+    /// inline `+N more` overflow pill.
+    public func citations(_ sources: [Int: URL]) -> MarkdownView {
+        var copy = self
+        copy.citationSources = sources
+        return copy
+    }
+
     public var body: some View {
         // Use sizeThatFits on the representable — the UIViewRepresentable protocol method
         // is called synchronously during SwiftUI's layout pass and returns the correct
@@ -69,7 +86,8 @@ public struct MarkdownView: View {
             contentSource: contentSource,
             theme: theme,
             codeBlockAutoScroll: codeBlockAutoScroll,
-            codeBlockBarHidden: codeBlockBarHidden
+            codeBlockBarHidden: codeBlockBarHidden,
+            citationSources: citationSources
         )
         .fixedSize(horizontal: false, vertical: true)
     }

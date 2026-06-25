@@ -14,6 +14,12 @@ private let mathPattern: NSRegularExpression? = {
         ###"\\\\\(([\s\S]*?)\\\\\)"###, // 带转义的行内公式 \\( ... \\)
         ###"\\\[ ([\s\S]*?) \\\]"###, // 单个反斜杠的块级公式 \[ ... \]，前后需要空格
         ###"\\\( ([^`\n]*?) \\\)"###, // 单个反斜杠的块级公式 \( ... \)，前后需要空格，中间不能有 ` 和 换行
+        // Inline math $...$  — captured PRE-cmark so backslashes survive.
+        // To avoid false positives on currency ($50), variable names ($x), or plain arithmetic ($a + b$),
+        // we REQUIRE the content to contain at least one LaTeX math indicator: \ ^ _ or {
+        // This allows: $x^2$, $\alpha$, $\frac{a}{b}$, $\sqrt{x}$, $2^{10}$, $x_{i}$
+        // This rejects: $50, $100, $a+b (no LaTeX operators/commands)
+        "(?<!\\$)\\$(?!\\$)((?=[^\\r\\n\\$]*[\\\\^_{])[^\\r\\n\\$`]+?)(?<!\\$)\\$(?!\\$)",
     ]
     let pattern = patterns.joined(separator: "|")
     guard let regex = try? NSRegularExpression(
@@ -120,7 +126,10 @@ public extension MarkdownParser {
 private let mathPatternWithinBlock: NSRegularExpression? = {
     let patterns = [
         ###"\\\( ([^\r\n]+?) \\\)"###, // 行内公式 \(...\)
-        ###"\$(?!\d)((?:[^\r\n$`]|\\.)+?)\$"###, // 行内公式 $...$ (no spaces required; negative lookahead avoids currency like $50)
+        // Inline $...$ post-cmark fallback.
+        // Same strict rule: content must contain at least one of \ ^ _ { to qualify as math.
+        // This prevents matching $50, $x, plain currency and stray dollar signs.
+        "\\$(?=[^\\r\\n\\$]*[\\\\^_{])((?:[^\\r\\n\\$`]|\\\\.)+?)\\$",
     ]
     let pattern = patterns.joined(separator: "|")
     guard let regex = try? NSRegularExpression(

@@ -101,7 +101,7 @@ final class TableView: UIView {
         scrollView.clipsToBounds = false
         scrollView.frame = bounds
         scrollView.contentSize = intrinsicContentSize
-        gridView.frame = bounds
+        gridView.frame = CGRect(origin: .zero, size: intrinsicContentSize)
 
         layoutCells()
     }

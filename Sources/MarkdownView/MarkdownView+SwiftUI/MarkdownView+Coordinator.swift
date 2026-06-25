@@ -12,6 +12,11 @@ final class MarkdownViewCoordinator {
     var lastPreprocessedContent: MarkdownTextView.PreprocessedContent?
     var lastTheme: MarkdownTheme = .default
 
+    /// Tracks the previous value of `codeBlockAutoScroll` so we can detect
+    /// the streaming → idle transition and finalize the incremental parser
+    /// in-place rather than doing a full re-parse.
+    var lastStreamingState: Bool = false
+
     /// Incremental parser used only during streaming (`codeBlockAutoScroll == true`).
     /// Maintains a cached stable prefix so only the short live tail is re-parsed
     /// each drain tick rather than the full accumulated text.

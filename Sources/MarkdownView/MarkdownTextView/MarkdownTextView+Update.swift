@@ -9,6 +9,29 @@ import CoreText
 import Litext
 import UIKit
 
+// MARK: - Scroll preservation helpers
+
+private extension UIView {
+    /// Walks up the view hierarchy to find the nearest ancestor UIScrollView.
+    var nearestScrollView: UIScrollView? {
+        var candidate = superview
+        while let view = candidate {
+            if let sv = view as? UIScrollView { return sv }
+            candidate = view.superview
+        }
+        return nil
+    }
+}
+
+private extension UIScrollView {
+    /// Returns true when the scroll view is scrolled to (or very near) its bottom.
+    var isNearBottom: Bool {
+        let maxOffset = contentSize.height - bounds.height + contentInset.bottom
+        guard maxOffset > 0 else { return true }
+        return contentOffset.y >= maxOffset - 40  // 40pt slack
+    }
+}
+
 extension MarkdownTextView {
     func updateTextExecute() {
         assert(Thread.isMainThread)
@@ -54,11 +77,13 @@ extension MarkdownTextView {
 
         // ── Manage the view pool ──────────────────────────────────────────
         // Only stash views that belong to DIRTY (changed/removed) blocks.
-        // The clean prefix's views never change, so they're never removed —
-        // we only need to track the dirty-old views for cleanup, not the whole
-        // contextViews set (avoids two O(n_views) Set allocations per frame).
+        // Views belonging to the clean prefix are kept in contextViews and
+        // must NOT be stashed — they're still referenced by cached attrstrings.
         viewProvider.lockPool()
         defer { viewProvider.unlockPool() }
+
+        // Collect the full set of old views for cleanup tracking
+        let oldContextViewsSet = Set(contextViews)
 
         // Stash only the views from segments that are being replaced
         let dirtyOldSegments = cachedBlocks.dropFirst(firstDirtyIndex)
@@ -68,6 +93,7 @@ extension MarkdownTextView {
                 dirtyOldViews.append(view)
                 if let cv = view as? CodeView { viewProvider.stashCodeView(cv); continue }
                 if let tv = view as? TableView { viewProvider.stashTableView(tv); continue }
+                assertionFailure("Unknown subview type in cached segment")
             }
         }
 
@@ -102,7 +128,29 @@ extension MarkdownTextView {
         }
         cachedAttributedString.endEditing()
 
+        // ── Scroll-position preservation ──────────────────────────────────
+        // When the user has manually scrolled up to read earlier content,
+        // setting attributedText causes the parent scroll view to jump back
+        // to the bottom (because the content height changes and SwiftUI
+        // invalidates layout). We capture the scroll offset before the update
+        // and restore it after layout if the user was NOT at the bottom.
+        let scrollView = nearestScrollView
+        let userScrolledUp = scrollView.map { !$0.isNearBottom } ?? false
+        let savedOffset = scrollView?.contentOffset
+
         textView.attributedText = cachedAttributedString
+
+        // Restore the saved scroll position after the layout pass so the view
+        // stays put. We defer by one run-loop cycle so the layout has settled.
+        if userScrolledUp, let sv = scrollView, let offset = savedOffset {
+            DispatchQueue.main.async {
+                // Only restore if the user is still scrolled up (they may have
+                // scrolled to bottom again in the tiny gap).
+                if !sv.isNearBottom || sv.contentOffset.y < offset.y {
+                    sv.setContentOffset(offset, animated: false)
+                }
+            }
+        }
 
         // ── Update contextViews ───────────────────────────────────────────
         contextViews = allSegments.flatMap(\.subviews)
@@ -115,14 +163,9 @@ extension MarkdownTextView {
         }
 
         // ── Remove views that are no longer in use ────────────────────────
-        // Only the dirty-old views could have been removed (clean-prefix views
-        // are always retained). A dirty-old view that isn't present in the new
-        // segments' views is gone → remove from superview.
-        if !dirtyOldViews.isEmpty {
-            let newViewsSet = Set(newSegments.flatMap(\.subviews))
-            for goneView in dirtyOldViews where !newViewsSet.contains(goneView) {
-                goneView.removeFromSuperview()
-            }
+        let currentViewsSet = Set(contextViews)
+        for goneView in oldContextViewsSet where !currentViewsSet.contains(goneView) {
+            goneView.removeFromSuperview()
         }
 
         textView.setNeedsLayout()

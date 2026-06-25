@@ -13,6 +13,7 @@ struct MarkdownViewRepresentable: UIViewRepresentable, MarkdownViewRepresentable
     let theme: MarkdownTheme
     var codeBlockAutoScroll: Bool = false
     var codeBlockBarHidden: Bool = false
+    var citationSources: [Int: URL] = [:]
 
     func makeUIView(context _: Context) -> MarkdownTextView {
         createMarkdownTextView()
