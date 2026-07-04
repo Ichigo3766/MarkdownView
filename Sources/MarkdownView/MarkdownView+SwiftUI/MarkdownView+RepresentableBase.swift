@@ -161,8 +161,13 @@ extension MarkdownViewRepresentableBase {
                     }
 
                     // Pass 2: render math off-thread, then refresh the view.
+                    // IMPORTANT: we must clear the block-level render cache before
+                    // calling setMarkdownManually again, otherwise updateTextExecute()
+                    // sees identical blocks and returns early without redrawing the
+                    // math images that were just rendered into preprocessed.rendered.
                     guard !Task.isCancelled else { return }
                     preprocessed.renderMathAsync(theme: capturedTheme) { @MainActor in
+                        view.cachedBlockSegments.removeAll()
                         view.setMarkdownManually(preprocessed)
                         view.invalidateIntrinsicContentSize()
                     }

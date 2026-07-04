@@ -73,12 +73,13 @@ public enum MathRenderer {
         )
         let (error, image) = mathImage.asImage()
 
-        guard error == nil, let image else {
+        if let error = error {
             #if DEBUG
-            print("[!] MathRenderer failed to render: \(latex) \(error?.localizedDescription ?? "?")")
+            print("[MathRenderer] ❌ FAILED for latex='\(latex.prefix(80))' error=\(error.localizedDescription)")
             #endif
             return nil
         }
+        guard let image else { return nil }
 
         let result = image.withRenderingMode(.alwaysTemplate).withTintColor(.label)
         renderCache.setValue(result, forKey: cacheKey)

@@ -16,7 +16,7 @@ extension MarkdownTextView {
         guard let image = MathRenderer.renderToImage(
             latex: latexContent,
             fontSize: previewFontSize,
-            textColor: theme.colors.body
+            textColor: .black
         ) else {
             #if DEBUG
             print("[MarkdownView] Failed to render LaTeX for preview: \(latexContent)")
@@ -24,7 +24,23 @@ extension MarkdownTextView {
             return
         }
 
-        guard let pngData = image.pngData() else { return }
+        // Composite onto an opaque white background so QLPreviewController
+        // always displays black text on white — regardless of system appearance.
+        // (SwiftMath renders onto a transparent canvas; QLPreviewController
+        //  places transparent PNGs on a dark background, making dark text invisible.)
+        let padding: CGFloat = 24
+        let canvasSize = CGSize(
+            width: image.size.width + padding * 2,
+            height: image.size.height + padding * 2
+        )
+        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        let composited = renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: canvasSize))
+            image.draw(in: CGRect(x: padding, y: padding, width: image.size.width, height: image.size.height))
+        }
+
+        guard let pngData = composited.pngData() else { return }
 
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

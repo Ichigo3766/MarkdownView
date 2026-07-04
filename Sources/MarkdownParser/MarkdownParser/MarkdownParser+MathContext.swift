@@ -7,28 +7,52 @@
 
 import Foundation
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PRE-CMARK math pattern
+//
+// Runs over the raw markdown string *before* CommonMark sees it.  Every match
+// is replaced by an opaque placeholder token so cmark never touches the LaTeX
+// (backslashes are otherwise consumed/escaped by cmark).
+//
+// Pattern ordering: most-specific first so that `$$` wins over `$` and
+// double-backslash `\\[` wins over single `\[`.
+//
+// CURRENCY SAFETY: the bare `$...$` pattern requires at least one LaTeX
+// indicator character inside (backslash, ^, _, or {).  This means:
+//   MATCHED  → $x^2$  $\alpha$  $\frac{a}{b}$  $x_{i}$  $2^{10}$
+//   IGNORED  → $50   $100   $5.99   $a + b   "earn $5 or $10"
+// ─────────────────────────────────────────────────────────────────────────────
 private let mathPattern: NSRegularExpression? = {
     let patterns = [
-        ###"\$\$([\s\S]*?)\$\$"###, // 块级公式 $$ ... $$
-        ###"\\\\\[([\s\S]*?)\\\\\]"###, // 带转义的块级公式 \\[ ... \\]
-        ###"\\\\\(([\s\S]*?)\\\\\)"###, // 带转义的行内公式 \\( ... \\)
-        ###"\\\[ ([\s\S]*?) \\\]"###, // 单个反斜杠的块级公式 \[ ... \]，前后需要空格
-        ###"\\\( ([^`\n]*?) \\\)"###, // 单个反斜杠的块级公式 \( ... \)，前后需要空格，中间不能有 ` 和 换行
-        // Inline math $...$  — captured PRE-cmark so backslashes survive.
-        // To avoid false positives on currency ($50), variable names ($x), or plain arithmetic ($a + b$),
-        // we REQUIRE the content to contain at least one LaTeX math indicator: \ ^ _ or {
-        // This allows: $x^2$, $\alpha$, $\frac{a}{b}$, $\sqrt{x}$, $2^{10}$, $x_{i}$
-        // This rejects: $50, $100, $a+b (no LaTeX operators/commands)
+        // 1. Display math:  $$ ... $$
+        ###"\$\$([\s\S]*?)\$\$"###,
+
+        // 2. Display math:  \\[ ... \\]  (double-backslash, already-escaped form)
+        ###"\\\\\[([\s\S]*?)\\\\\]"###,
+
+        // 3. Inline math:   \\( ... \\)  (double-backslash, already-escaped form)
+        ###"\\\\\(([\s\S]*?)\\\\\)"###,
+
+        // 4. Display math:  \[ ... \]  (single backslash; spaces NOT required)
+        ###"\\\[([\s\S]*?)\\\]"###,
+
+        // 5. Inline math:   \( ... \)  (single backslash; spaces NOT required)
+        //    [^\r\n]*? keeps it on one line so we never swallow a closing
+        //    parenthesis from unrelated prose across a paragraph break.
+        ###"\\\(([^\r\n]*?)\\\)"###,
+
+        // 6. Inline math:   $...$
+        //    Negative lookahead/lookbehind prevents matching $$ (display).
+        //    Lookahead requires at least one of  \ ^ _ {  inside the span
+        //    to guard against currency values like $50, $100, $a+b.
         "(?<!\\$)\\$(?!\\$)((?=[^\\r\\n\\$]*[\\\\^_{])[^\\r\\n\\$`]+?)(?<!\\$)\\$(?!\\$)",
     ]
     let pattern = patterns.joined(separator: "|")
     guard let regex = try? NSRegularExpression(
         pattern: pattern,
-        options: [
-            .caseInsensitive,
-            // NOTE: Do NOT add .allowCommentsAndWhitespace here — the spaces in
-            // \[ ... \] and \( ... \) patterns are intentional mandatory delimiters.
-        ]
+        options: [.caseInsensitive]
+        // NOTE: Do NOT add .allowCommentsAndWhitespace — that would break the
+        // patterns that rely on literal whitespace.
     ) else {
         assertionFailure("failed to create regex for math pattern")
         return nil
@@ -76,17 +100,17 @@ public extension MarkdownParser {
                 return
             }
 
-            var document = document
-            let matches = extractMathMatches(in: document, using: regex).reversed()
-            if matches.isEmpty { return }
+        var document = document
+        let matches = extractMathMatches(in: document, using: regex).reversed()
+        if matches.isEmpty { return }
 
-            for match in matches {
-                guard let fullRange = Range(match.range, in: document) else { continue }
-                let replacement = register(content: match.content, source: match.source)
-                document.replaceSubrange(fullRange, with: replacement)
-            }
+        for match in matches {
+            guard let fullRange = Range(match.range, in: document) else { continue }
+            let replacement = register(content: match.content, source: match.source)
+            document.replaceSubrange(fullRange, with: replacement)
+        }
 
-            indexedContent = document
+        indexedContent = document
         }
 
         func register(content: String, source: String? = nil) -> String {
@@ -123,20 +147,28 @@ public extension MarkdownParser {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST-CMARK (within-block) math pattern
+//
+// Applied to `.text` nodes that survived CommonMark parsing without being
+// converted to a replacement placeholder.  This is a fallback for cases where
+// the pre-cmark pass didn't see the span (e.g. content reconstructed from
+// emphasis or strong children, or math expressions cmark decoded differently).
+//
+// Same currency safety rule as above.
+// ─────────────────────────────────────────────────────────────────────────────
 private let mathPatternWithinBlock: NSRegularExpression? = {
     let patterns = [
-        ###"\\\( ([^\r\n]+?) \\\)"###, // 行内公式 \(...\)
-        // Inline $...$ post-cmark fallback.
-        // Same strict rule: content must contain at least one of \ ^ _ { to qualify as math.
-        // This prevents matching $50, $x, plain currency and stray dollar signs.
+        // \( ... \) inline — single backslash, no space requirement
+        ###"\\\(([^\r\n]*?)\\\)"###,
+
+        // $...$ guarded inline — must contain a LaTeX indicator
         "\\$(?=[^\\r\\n\\$]*[\\\\^_{])((?:[^\\r\\n\\$`]|\\\\.)+?)\\$",
     ]
     let pattern = patterns.joined(separator: "|")
     guard let regex = try? NSRegularExpression(
         pattern: pattern,
-        options: [
-            .caseInsensitive,
-        ]
+        options: [.caseInsensitive]
     ) else {
         assertionFailure("failed to create regex for math pattern")
         return nil

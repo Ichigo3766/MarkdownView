@@ -141,14 +141,26 @@ final class IncrementalStreamingParser {
     }
 
     /// Finalizes the stream — settles the entire text as if streaming were
-    /// complete. Falls through to `parse()` which handles the stable prefix
-    /// caching correctly. The streaming-end path in the coordinator calls
-    /// this so the final partial paragraph is fully settled.
+    /// complete. Unlike `parse()`, this performs a full re-parse with
+    /// **synchronous math image rendering** so that equations appear as
+    /// rendered formulas rather than the grey inline-code fallback.
+    ///
+    /// This runs on a background `Task.detached` (see `RepresentableBase`),
+    /// so the synchronous `MathRenderer.renderToImage` calls here do not
+    /// block the main thread.
     func finalize(
         _ text: String,
         theme: MarkdownTheme
     ) -> MarkdownTextView.PreprocessedContent {
-        parse(text, theme: theme)
+        print("[IncrementalStreamingParser] finalize() called — textLength=\(text.count)")
+        // Full parse so the final paragraph is fully settled (no minTailLength cutoff).
+        let parser = MarkdownParser()
+        let result = parser.parse(text)
+        print("[IncrementalStreamingParser] finalize() parse done — mathContext.count=\(result.mathContext.count), blocks=\(result.document.count)")
+        // Render math images synchronously — we're already on a background thread.
+        let content = MarkdownTextView.PreprocessedContent(parserResult: result, theme: theme)
+        print("[IncrementalStreamingParser] finalize() PreprocessedContent built — rendered.count=\(content.rendered.count)")
+        return content
     }
 
     // MARK: - Private: Boundary Detection
