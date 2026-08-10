@@ -166,7 +166,14 @@ extension MarkdownViewRepresentableBase {
                     // sees identical blocks and returns early without redrawing the
                     // math images that were just rendered into preprocessed.rendered.
                     guard !Task.isCancelled else { return }
-                    preprocessed.renderMathAsync(theme: capturedTheme) { @MainActor in
+                    preprocessed.renderMathAsync(theme: capturedTheme) { @MainActor [weak view] in
+                        // Guard: if the view has been removed from the hierarchy (e.g. the
+                        // message scrolled away and the cell was recycled) do nothing.
+                        // Calling invalidateIntrinsicContentSize() on a detached view causes
+                        // SwiftUI to attempt EnvironmentValues resolution off the main-actor
+                        // context, which is the root cause of the
+                        // "SwiftUICore: EnvironmentValues.subscript.getter + 352" crash.
+                        guard let view, view.window != nil else { return }
                         view.cachedBlockSegments.removeAll()
                         view.setMarkdownManually(preprocessed)
                         view.invalidateIntrinsicContentSize()
