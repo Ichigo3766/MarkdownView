@@ -115,8 +115,22 @@ final class IncrementalStreamingParser {
         // drain loop. Equations will appear as placeholder text while the
         // stream is active and render properly once streaming finishes and
         // the non-streaming path takes over.
+        //
+        // Critical fix for unclosed code fences:
+        // If the tail ends inside an unclosed fence, append a synthetic
+        // closing ``` using the SAME indentation as the opening fence.
+        // CommonMark §4.5 requires the closing fence to be at the same or
+        // lesser indentation as its opener — a 0-space ``` does NOT close a
+        // 3-space ```python, so the block stays open and swallows everything
+        // that follows (bullet points, next code block, etc.).
         let parser = MarkdownParser()
-        let tailResult = parser.parse(tailText)
+        let tailToParse: String
+        if let openIndent = openFenceIndent(tailText) {
+            tailToParse = tailText + "\n\(openIndent)```"  // synthetic close with matching indent
+        } else {
+            tailToParse = tailText
+        }
+        let tailResult = parser.parse(tailToParse)
 
         // ── 6. Update stable cache if the boundary advanced ───────────────
         // Only re-parse and cache the new stable portion when the boundary
@@ -165,6 +179,48 @@ final class IncrementalStreamingParser {
 
     // MARK: - Private: Boundary Detection
 
+    /// Returns the indentation prefix (0–3 spaces) of the unclosed opening
+    /// fence if the tail text ends inside an open fence, or nil if balanced.
+    ///
+    /// Scans line-by-line tracking open/close state. When a fence opens we
+    /// record its indentation; when a matching ``` line closes it we clear.
+    /// At the end, if still open we return the recorded indentation so the
+    /// caller can synthesize a correctly-indented closing fence.
+    ///
+    /// CommonMark §4.5: a closing fence must have the same or lesser
+    /// indentation as its opening fence. A 0-space ``` will NOT close a
+    /// 3-space ```python — so we must match the indent exactly.
+    private func openFenceIndent(_ tail: String) -> String? {
+        var insideFence = false
+        var currentIndent = ""
+        var lineStart = tail.startIndex
+        while lineStart < tail.endIndex {
+            let lineEnd = tail[lineStart...].firstIndex(of: "\n") ?? tail.endIndex
+            let line = tail[lineStart..<lineEnd]
+            // Measure leading spaces (up to 3)
+            var indent = ""
+            var rest = line[line.startIndex...]
+            while indent.count < 3, rest.first == " " {
+                indent.append(" ")
+                rest = rest.dropFirst()
+            }
+            if rest.hasPrefix("```") {
+                if insideFence {
+                    // This is a closing fence — exit fence state
+                    insideFence = false
+                    currentIndent = ""
+                } else {
+                    // This is an opening fence — record its indentation
+                    insideFence = true
+                    currentIndent = indent
+                }
+            }
+            if lineEnd == tail.endIndex { break }
+            lineStart = tail.index(after: lineEnd)
+        }
+        return insideFence ? currentIndent : nil
+    }
+
     /// Returns the character offset (from `startIndex`) of the start of the
     /// live tail — i.e., the position right after the last `\n\n` that leaves
     /// at least `minTailLength` characters remaining.
@@ -208,9 +264,15 @@ final class IncrementalStreamingParser {
             let lineOffsetStart = charOffset
             let lineLen = text.distance(from: lineStart, to: lineEnd)
 
-            // Check if this line starts with ```
+            // Check if this line starts with ``` (strip up to 3 leading spaces per CommonMark §4.5)
             let linePrefix = text[lineStart..<lineEnd]
-            if linePrefix.hasPrefix("```") {
+            var strippedPrefix = linePrefix[linePrefix.startIndex...]
+            var leadingSpaces = 0
+            while leadingSpaces < 3, strippedPrefix.first == " " {
+                strippedPrefix = strippedPrefix.dropFirst()
+                leadingSpaces += 1
+            }
+            if strippedPrefix.hasPrefix("```") {
                 if insideFence {
                     // Closing fence — record the fenced region up to and
                     // including this closing ``` line.
