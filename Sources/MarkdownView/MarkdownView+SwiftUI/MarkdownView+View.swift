@@ -31,6 +31,30 @@ public struct MarkdownView: View {
     /// a `+N more` overflow pill.
     public var citationSources: [Int: URL] = [:]
 
+    /// Controls block-splitting for large, finished messages.
+    ///
+    /// When enabled (either explicitly via `.blockSplitting()` or automatically
+    /// once a non-streaming message exceeds `autoBlockSplitThreshold` characters),
+    /// the message is parsed once off-main, split into small chunks, cached, and
+    /// rendered as a plain VStack of small MarkdownViews. This bounds every
+    /// CoreText layout/measure/draw pass to one chunk so a 70k-word message no
+    /// longer blocks the main thread on load.
+    ///
+    /// - `.auto`   → split only when large and not streaming (default).
+    /// - `.always` → always split (still skipped while streaming).
+    /// - `.never`  → never split; use the classic single-view path.
+    public var blockSplittingMode: BlockSplittingMode = .auto
+
+    public enum BlockSplittingMode: Equatable {
+        case auto
+        case always
+        case never
+    }
+
+    /// Non-streaming messages longer than this many characters are auto-split.
+    public static let autoBlockSplitThreshold = 8000
+
+
     public init(_ text: String, theme: MarkdownTheme = .default) {
         contentSource = .text(text)
         self.theme = theme
@@ -68,7 +92,46 @@ public struct MarkdownView: View {
         return copy
     }
 
+    /// Fluent setter for block-splitting behavior. Default is `.auto`.
+    public func blockSplitting(_ mode: BlockSplittingMode = .always) -> MarkdownView {
+        var copy = self
+        copy.blockSplittingMode = mode
+        return copy
+    }
+
+    /// Decides whether this render should use the chunked block-split path.
+    /// Block-splitting only applies to plain-text (non-preprocessed) sources that
+    /// are NOT streaming (auto-scroll off). Streaming keeps the single-view +
+    /// incremental parser path untouched.
+    private var shouldBlockSplit: Bool {
+        guard case let .text(text) = contentSource else { return false }
+        guard !codeBlockAutoScroll else { return false } // never split while streaming
+        switch blockSplittingMode {
+        case .never:
+            return false
+        case .always:
+            return true
+        case .auto:
+            return text.count >= Self.autoBlockSplitThreshold
+        }
+    }
+
     public var body: some View {
+        if shouldBlockSplit, case let .text(text) = contentSource {
+            BlockRenderedMarkdownView(
+                text: text,
+                theme: theme,
+                codeBlockBarHidden: codeBlockBarHidden,
+                citationSources: citationSources,
+                chunkCharBudget: PreprocessedContent.defaultChunkCharBudget
+            )
+        } else {
+            classicBody
+        }
+    }
+
+    private var classicBody: some View {
+
         // Use sizeThatFits on the representable — the UIViewRepresentable protocol method
         // is called synchronously during SwiftUI's layout pass and returns the correct
         // height without any @State feedback loop.
