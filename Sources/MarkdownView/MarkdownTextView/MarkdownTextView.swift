@@ -45,7 +45,7 @@ public final class MarkdownTextView: UIView {
     /// Cached value for setCodeBlockBarHidden — same guard pattern.
     private var _barHidden: Bool = false
     var cancellables = Set<AnyCancellable>()
-    let contentSubject = CurrentValueSubject<PreprocessedContent, Never>(.init())
+    let contentSubject = PassthroughSubject<PreprocessedContent, Never>()
 
     let viewProvider: ReusableViewProvider
 
