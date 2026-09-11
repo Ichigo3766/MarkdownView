@@ -39,8 +39,8 @@ public final class MarkdownBlockRenderCache {
     private var storage: [Int: Entry] = [:]
     /// Most-recently-used ordering; last element is newest.
     private var lru: [Int] = []
-    /// Keys with an in-flight build so we don't launch duplicate parses.
-    private var inFlight: Set<Int> = []
+    /// Every requester must be notified when a shared parse finishes.
+    private var inFlight: [Int: [@MainActor ([MarkdownTextView.PreprocessedContent]) -> Void]] = [:]
 
     private init() {}
 
@@ -87,12 +87,8 @@ public final class MarkdownBlockRenderCache {
             completion(entry.chunks)
             return
         }
-        guard !inFlight.contains(k) else {
-            // A build is already running; the caller will pick it up on the next
-            // layout pass via lookup(). We don't queue multiple completions.
-            return
-        }
-        inFlight.insert(k)
+        inFlight[k, default: []].append(completion)
+        guard inFlight[k]?.count == 1 else { return }
 
         let capturedContent = content
         let capturedTheme = theme
@@ -114,8 +110,8 @@ public final class MarkdownBlockRenderCache {
                     guard let self else { return }
                     let chunks = parent.split(chunkCharBudget: chunkCharBudget)
                     self.store(key: k, chunks: chunks)
-                    self.inFlight.remove(k)
-                    completion(chunks)
+                    let completions = self.inFlight.removeValue(forKey: k) ?? []
+                    completions.forEach { $0(chunks) }
                 }
             }
         }
@@ -147,6 +143,5 @@ public final class MarkdownBlockRenderCache {
     public func removeAll() {
         storage.removeAll()
         lru.removeAll()
-        inFlight.removeAll()
     }
 }

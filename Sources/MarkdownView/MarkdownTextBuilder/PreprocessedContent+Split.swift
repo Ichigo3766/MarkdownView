@@ -42,10 +42,9 @@ public extension MarkdownTextView.PreprocessedContent {
     /// (safe — see file header).
     ///
     /// - Parameter chunkCharBudget: soft target for coalesced light-block chunks.
-    /// - Returns: chunks in document order. Returns `[self]` when there is 0 or 1
-    ///   block (nothing to gain from splitting).
+    /// - Returns: chunks in document order, including subdivisions of large text blocks.
     func split(chunkCharBudget: Int = MarkdownTextView.PreprocessedContent.defaultChunkCharBudget) -> [MarkdownTextView.PreprocessedContent] {
-        guard blocks.count > 1 else { return [self] }
+        let budget = max(1, chunkCharBudget)
 
         var chunks: [MarkdownTextView.PreprocessedContent] = []
         var pending: [MarkdownBlockNode] = []
@@ -58,7 +57,7 @@ public extension MarkdownTextView.PreprocessedContent {
             pendingWeight = 0
         }
 
-        for node in blocks {
+        for node in blocks.flatMap({ $0.splitLargeBlock(budget: budget) }) {
             if node.isHeavyForSplitting {
                 // Heavy blocks stand alone.
                 flushPending()
@@ -68,7 +67,7 @@ public extension MarkdownTextView.PreprocessedContent {
 
             pending.append(node)
             pendingWeight += node.approxWeightForSplitting
-            if pendingWeight >= chunkCharBudget {
+            if pendingWeight >= budget {
                 flushPending()
             }
         }
@@ -91,6 +90,29 @@ public extension MarkdownTextView.PreprocessedContent {
 // MARK: - Block weighting for chunk boundaries
 
 private extension MarkdownBlockNode {
+    func splitLargeBlock(budget: Int) -> [MarkdownBlockNode] {
+        guard approxWeightForSplitting > budget else { return [self] }
+        switch self {
+        case let .paragraph(content):
+            return content.splitInlineRuns(budget: budget).map { .paragraph(content: $0) }
+        case let .bulletedList(tight, items):
+            return weightedChunks(items, budget: budget, weight: { $0.children.reduce(0) { $0 + $1.approxWeightForSplitting } })
+                .map { .bulletedList(isTight: tight, items: $0) }
+        case let .numberedList(tight, start, items):
+            var nextStart = start
+            return weightedChunks(items, budget: budget, weight: { $0.children.reduce(0) { $0 + $1.approxWeightForSplitting } })
+                .map { chunk in
+                    defer { nextStart += chunk.count }
+                    return .numberedList(isTight: tight, start: nextStart, items: chunk)
+                }
+        case let .taskList(tight, items):
+            return weightedChunks(items, budget: budget, weight: { $0.children.reduce(0) { $0 + $1.approxWeightForSplitting } })
+                .map { .taskList(isTight: tight, items: $0) }
+        default:
+            return [self]
+        }
+    }
+
     /// Blocks that host their own dedicated UIView subview (CodeView/TableView)
     /// and can be individually expensive — always isolated into their own chunk.
     var isHeavyForSplitting: Bool {
@@ -130,6 +152,10 @@ private extension MarkdownBlockNode {
 }
 
 private extension Array where Element == MarkdownInlineNode {
+    func splitInlineRuns(budget: Int) -> [[MarkdownInlineNode]] {
+        weightedChunks(flatMap { $0.splitLargeInline(budget: budget) }, budget: budget, weight: { $0.plainTextApproxCount })
+    }
+
     /// Cheap approximate plain-text length of an inline run for chunk sizing.
     var plainTextApproxCount: Int {
         reduce(0) { $0 + $1.plainTextApproxCount }
@@ -137,6 +163,34 @@ private extension Array where Element == MarkdownInlineNode {
 }
 
 private extension MarkdownInlineNode {
+    func splitLargeInline(budget: Int) -> [MarkdownInlineNode] {
+        guard plainTextApproxCount > budget else { return [self] }
+        switch self {
+        case let .text(text), let .code(text):
+            var result: [MarkdownInlineNode] = []
+            var remaining = text[...]
+            while !remaining.isEmpty {
+                var end = remaining.index(remaining.startIndex, offsetBy: budget, limitedBy: remaining.endIndex) ?? remaining.endIndex
+                if end != remaining.endIndex, let space = remaining[..<end].lastIndex(where: \.isWhitespace) {
+                    end = remaining.index(after: space)
+                }
+                let part = String(remaining[..<end])
+                if case .code = self { result.append(.code(part)) }
+                else { result.append(.text(part)) }
+                remaining = remaining[end...]
+            }
+            return result
+        case .emphasis, .strong, .strikethrough, .link:
+            return children.splitInlineRuns(budget: budget).map { run in
+                var copy = self
+                copy.children = run
+                return copy
+            }
+        default:
+            return [self]
+        }
+    }
+
     var plainTextApproxCount: Int {
         switch self {
         case let .text(s):
@@ -161,4 +215,22 @@ private extension MarkdownInlineNode {
             return children.plainTextApproxCount
         }
     }
+}
+
+private func weightedChunks<T>(_ values: [T], budget: Int, weight: (T) -> Int) -> [[T]] {
+    var result: [[T]] = []
+    var pending: [T] = []
+    var pendingWeight = 0
+    for value in values {
+        let valueWeight = weight(value)
+        if !pending.isEmpty && pendingWeight + valueWeight > budget {
+            result.append(pending)
+            pending = []
+            pendingWeight = 0
+        }
+        pending.append(value)
+        pendingWeight += valueWeight
+    }
+    if !pending.isEmpty { result.append(pending) }
+    return result
 }
