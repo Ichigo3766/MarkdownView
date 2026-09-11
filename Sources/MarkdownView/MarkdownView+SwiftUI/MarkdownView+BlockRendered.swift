@@ -33,7 +33,7 @@ struct BlockRenderedMarkdownView: View {
     /// The (content, themeSignature) the current `chunks` were built for, so we
     /// rebuild when either changes.
     @State private var builtKey: Int = 0
-    @State private var buildInFlight: Bool = false
+    @State private var buildInFlight: Int? = nil
 
     var body: some View {
         let key = MarkdownBlockRenderCache.key(content: text, theme: theme)
@@ -44,7 +44,7 @@ struct BlockRenderedMarkdownView: View {
             if let hit = MarkdownBlockRenderCache.shared.lookup(content: text, theme: theme) {
                 return hit
             }
-            return nil
+            return chunks
         }()
 
         Group {
@@ -67,12 +67,7 @@ struct BlockRenderedMarkdownView: View {
             }
         }
 
-        .onAppear { ensureBuild(key: key) }
-        .onChange(of: key) { _ in
-            // Content or theme changed — resolve for the new key.
-            chunks = nil
-            ensureBuild(key: key)
-        }
+        .task(id: key) { ensureBuild(key: key) }
     }
 
     /// Rough placeholder height so a cache-miss doesn't collapse the row before
@@ -106,8 +101,8 @@ struct BlockRenderedMarkdownView: View {
             builtKey = key
             return
         }
-        guard !buildInFlight else { return }
-        buildInFlight = true
+        guard buildInFlight != key else { return }
+        buildInFlight = key
 
         MarkdownBlockRenderCache.shared.build(
             content: text,
@@ -115,9 +110,8 @@ struct BlockRenderedMarkdownView: View {
             chunkCharBudget: chunkCharBudget
         ) { built in
             // Only apply if the key still matches the current content/theme.
-            let currentKey = MarkdownBlockRenderCache.key(content: text, theme: theme)
-            buildInFlight = false
-            guard currentKey == key else { return }
+            guard buildInFlight == key else { return }
+            buildInFlight = nil
             chunks = built
             builtKey = key
         }
