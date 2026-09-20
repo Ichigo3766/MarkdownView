@@ -111,6 +111,7 @@ public final class CodeHighlighter: @unchecked Sendable {
             : content
 
         let lang = language?.lowercased() ?? ""
+        guard lang != "plaintext" else { return [:] }
 
         // All JSContext calls must be serialised onto highlightQueue.
         let map: HighlightMap = await withCheckedContinuation { continuation in
@@ -128,7 +129,7 @@ public final class CodeHighlighter: @unchecked Sendable {
 
                 let nsAttrStr: NSAttributedString?
 
-                if lang.isEmpty || lang == "plaintext" {
+                if lang.isEmpty {
                     if highlightContent.count > 5_000 {
                         continuation.resume(returning: [:])
                         return

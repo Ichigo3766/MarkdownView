@@ -95,6 +95,9 @@ private extension MarkdownBlockNode {
         switch self {
         case let .paragraph(content):
             return content.splitInlineRuns(budget: budget).map { .paragraph(content: $0) }
+        case let .blockquote(children):
+            return weightedChunks(children.flatMap { $0.splitLargeBlock(budget: budget) }, budget: budget, weight: { $0.approxWeightForSplitting })
+                .map { .blockquote(children: $0) }
         case let .bulletedList(tight, items):
             return weightedChunks(items, budget: budget, weight: { $0.children.reduce(0) { $0 + $1.approxWeightForSplitting } })
                 .map { .bulletedList(isTight: tight, items: $0) }

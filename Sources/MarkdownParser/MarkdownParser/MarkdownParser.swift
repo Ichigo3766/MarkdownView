@@ -48,6 +48,7 @@ public final class MarkdownParser: Sendable {
                 return cmark_parser_finish(parser)
             }
         }
+        defer { cmark_node_free(nodes) }
         var blocks = dumpBlocks(root: nodes)
         blocks = finalizeMathBlocks(blocks, mathContext: math)
         return .init(document: blocks, mathContext: math.contents)
