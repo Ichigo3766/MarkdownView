@@ -22,7 +22,7 @@ let package = Package(
         .library(name: "MarkdownParser", targets: ["MarkdownParser"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Ichigo3766/Litext.git", branch: "main"),
+        .package(url: "https://github.com/Ichigo3766/Litext.git", revision: "d673236255ffc82a704e8ec3b5fe577ebcb9712e"),
         .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.7.3"),
         .package(url: "https://github.com/apple/swift-collections", branch: "main"),
         .package(url: "https://github.com/smittytone/HighlighterSwift", branch: "main"),

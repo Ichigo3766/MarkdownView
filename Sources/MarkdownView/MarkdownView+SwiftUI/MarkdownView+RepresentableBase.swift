@@ -15,6 +15,7 @@ protocol MarkdownViewRepresentableBase {
     var codeBlockAutoScroll: Bool { get }
     var codeBlockBarHidden: Bool { get }
     var citationSources: [Int: URL] { get }
+    var revealController: MarkdownRevealController? { get }
 }
 
 extension MarkdownViewRepresentableBase {

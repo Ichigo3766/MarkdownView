@@ -38,6 +38,11 @@ public final class MarkdownTextView: UIView {
     // on every streaming update — converts O(n_total) concat to O(n_dirty).
     var cachedAttributedString: NSMutableAttributedString = .init()
 
+    // Draw-time reveal state (see MarkdownTextView+Reveal.swift).
+    var revealProgress: Double?
+    var revealFadeCharacters: CGFloat = 0
+    var revealOffsets: [Int]?
+
     var contextViews: [UIView] = []
     /// Cached value for setCodeBlockAutoScroll — guards against O(n_views) iteration
     /// on every no-change updateUIView call during streaming (60fps × N messages).

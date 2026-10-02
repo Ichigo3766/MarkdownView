@@ -139,6 +139,8 @@ extension MarkdownTextView {
         let savedOffset = scrollView?.contentOffset
 
         textView.attributedText = cachedAttributedString
+        revealOffsets = nil
+        applyReveal()
 
         // Restore the saved scroll position after the layout pass so the view
         // stays put. We defer by one run-loop cycle so the layout has settled.

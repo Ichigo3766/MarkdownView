@@ -30,7 +30,8 @@ public struct MarkdownView: View {
     /// stream completion. Groups of >2 citations show the first two inline plus
     /// a `+N more` overflow pill.
     public var citationSources: [Int: URL] = [:]
-
+    /// Drives a draw-time reveal of the text; see `revealing(_:)`.
+    var revealController: MarkdownRevealController?
     /// Controls block-splitting for large, finished messages.
     ///
     /// When enabled (either explicitly via `.blockSplitting()` or automatically
@@ -92,6 +93,13 @@ public struct MarkdownView: View {
         return copy
     }
 
+    /// Attaches a controller that reveals this view's text at draw time.
+    public func revealing(_ controller: MarkdownRevealController?) -> MarkdownView {
+        var copy = self
+        copy.revealController = controller
+        return copy
+    }
+
     /// Fluent setter for block-splitting behavior. Default is `.auto`.
     public func blockSplitting(_ mode: BlockSplittingMode = .always) -> MarkdownView {
         var copy = self
@@ -150,7 +158,8 @@ public struct MarkdownView: View {
             theme: theme,
             codeBlockAutoScroll: codeBlockAutoScroll,
             codeBlockBarHidden: codeBlockBarHidden,
-            citationSources: citationSources
+            citationSources: citationSources,
+            revealController: revealController
         )
         .fixedSize(horizontal: false, vertical: true)
     }

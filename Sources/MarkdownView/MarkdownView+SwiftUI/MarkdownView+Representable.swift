@@ -14,6 +14,7 @@ struct MarkdownViewRepresentable: UIViewRepresentable, MarkdownViewRepresentable
     var codeBlockAutoScroll: Bool = false
     var codeBlockBarHidden: Bool = false
     var citationSources: [Int: URL] = [:]
+    var revealController: MarkdownRevealController?
 
     func makeUIView(context _: Context) -> MarkdownTextView {
         createMarkdownTextView()
@@ -21,6 +22,7 @@ struct MarkdownViewRepresentable: UIViewRepresentable, MarkdownViewRepresentable
 
     func updateUIView(_ uiView: MarkdownTextView, context: Context) {
         updateMarkdownTextView(uiView, coordinator: context.coordinator)
+        revealController?.attach(uiView)
     }
 
     func makeCoordinator() -> MarkdownViewCoordinator {
